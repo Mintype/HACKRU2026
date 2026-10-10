@@ -222,12 +222,12 @@ the app runs.
 ### Never repeat
 
 Every insult that is actually said is appended to **`data/insults.txt`**, one per
-line — human-readable and hand-editable. That file is the never-repeat list:
-
-- its most recent lines are passed to Gemini as banned in the prompt
-- the hand-written fallbacks skip anything in it
-- the pool will not queue a line that is already in it or already queued
-- `validate()` drops any generated line that matches, whatever the model returns
+line — human-readable and hand-editable. There is no on-screen list any more;
+this file *is* the quote ledger, and it is what keeps the roasts original. Its
+most recent lines are passed to Gemini as banned in the prompt, the hand-written
+fallbacks skip anything in it, the pool will not queue a line that is already in
+it or already queued, and `validate()` drops any generated line that matches.
+`GET /api/roasts?limit=N` reads the same ledger if you want to see it.
 
 The hand-written pool is finite, so once every fallback has been used it may
 start repeating rather than saying nothing at all. The System panel shows how
@@ -290,7 +290,6 @@ turn off, and the arrangement is remembered in the browser's `localStorage`.
 | **Score** | score over the session with roast markers (resizable) |
 | **Controls** | calibrate, test roast, nice mode, thresholds and audio route |
 | **System** | camera/backend, fps, Nest, audio route, Gemini text + voice, local TTS, pool |
-| **Hall of shame** | the last 3 roasts, newest first — test and automatic, with tier, voice and angle |
 
 The top bar carries the state plate (away → good → slouch → warn → roast), the
 session clock and the live rate, then three icon buttons:
@@ -331,7 +330,7 @@ gradient fill under the trace, so the colour of the line *is* the reading.
 | GET | `/events` | server-sent events: readings, state changes, roasts |
 | GET | `/api/stats` | current session stats + live snapshot |
 | GET | `/api/history` | readings for the chart (+ roast markers) |
-| GET | `/api/roasts` | recent roasts (hall of shame) |
+| GET | `/api/roasts` | the quote ledger — recent roasts (default 3, `?limit=1..50`) |
 | GET | `/api/status` | camera fps, Nest connection, Gemini reachability |
 | POST | `/api/calibrate` | start the 5-second upright calibration |
 | GET | `/api/settings` | thresholds, nice mode, audio route |

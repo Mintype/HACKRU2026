@@ -11,8 +11,6 @@
   const TOPBAR = 44;
   const GAP = 12;
   const EDGE = 12;
-  //: How many roasts the hall of shame keeps on screen.
-  const SHAME_LIMIT = 3;
   const STORE_KEY = "posturecoach.hud.v4";
 
   /* ------------------------------------------------------------ registry */
@@ -24,7 +22,6 @@
     stats:    { title: "Session",       width: 300, column: "right", anchor: "top",    order: 0 },
     system:   { title: "System",        width: 300, column: "right", anchor: "top",    order: 1 },
     controls: { title: "Controls",      width: 320, column: "right", anchor: "bottom", order: 0 },
-    roasts:   { title: "Hall of shame", width: 320, column: "right", anchor: "bottom", order: 1, visible: false },
   };
 
   const STATE_CLASS = {
@@ -580,31 +577,6 @@
     captionTimer = setTimeout(() => caption.classList.remove("show"), 9000);
   }
 
-  function escapeHtml(text) {
-    return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  }
-
-  function renderRoasts(items) {
-    const list = $("shame-list");
-    if (!items.length) {
-      list.innerHTML = '<li class="empty">Nothing said yet.</li>';
-      return;
-    }
-    list.innerHTML = items
-      .slice(0, SHAME_LIMIT)
-      .map((r) => {
-        const bits = [
-          r.origin === "test" ? "test" : null,
-          r.tier,
-          r.source,
-          r.voice,
-          r.neck_angle != null ? `neck ${Number(r.neck_angle).toFixed(0)}\u00b0` : null,
-        ].filter(Boolean);
-        return `<li>${escapeHtml(r.text)}<span class="meta">${escapeHtml(bits.join("  \u00b7  "))}</span></li>`;
-      })
-      .join("");
-  }
-
   function updateStats(stats) {
     if (!stats) return;
     const live = stats.live || {};
@@ -697,14 +669,12 @@
         showCaption(data.text);
         markers.push({ ts: data.ts, text: data.text });
         requestChart();
-        fetchRoasts();
       } else if (data.kind === "event") {
         if (data.state) applyState(data.state);
         if (data.event === "session_start") {
           series.length = 0;
           markers.length = 0;
           sessionStartedAt = data.ts;
-          $("shame-list").innerHTML = '<li class="empty">No roasts this session.</li>';
           requestChart();
         } else if (data.event === "session_end") {
           fetchStats();
@@ -735,15 +705,6 @@
       requestChart();
     } catch (e) {
       /* nothing to seed yet */
-    }
-  }
-
-  async function fetchRoasts() {
-    try {
-      const data = await fetchJSON(`/api/roasts?limit=${SHAME_LIMIT}`);
-      renderRoasts(data.roasts || []);
-    } catch (e) {
-      /* ignore */
     }
   }
 
@@ -802,7 +763,6 @@
         const result = await fetchJSON("/api/test-roast", { method: "POST" });
         if (result.text) {
           showCaption(result.text);
-          fetchRoasts();
         }
       } catch (e) {
         $("settings-status").textContent = "Player busy \u2014 try again.";
@@ -893,7 +853,6 @@
     connect();
     fetchSettings();
     fetchHistory();
-    fetchRoasts();
     fetchStats();
     fetchStatus();
     requestAnimationFrame(resizeChart);

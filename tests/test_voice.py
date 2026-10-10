@@ -213,38 +213,56 @@ class TestRoastPersonalisation(unittest.TestCase):
                 self.assertNotIn("{n}", item["text"])
 
 
-class TestGeminiTTSQuotaBackoff(unittest.TestCase):
-    """The Gemini TTS free tier allows only ~10 requests/day, so a 429 must not
-    be retried on every clip the pool wants."""
+class TestGeminiTTSModelChain(unittest.TestCase):
+    """Free-tier quota is per model, and model names change, so the voice must
+    walk the chain instead of dying on the first unavailable model."""
 
-    def test_quota_error_stops_further_attempts(self):
-        import pathlib
-        import tempfile
-
-        from voice.gemini_tts import GeminiTTS, is_quota_error, quota_backoff_seconds
+    def test_helpers(self):
+        from voice.gemini_tts import is_quota_error, quota_backoff_seconds
 
         self.assertTrue(is_quota_error("429 RESOURCE_EXHAUSTED"))
         self.assertFalse(is_quota_error("connection reset by peer"))
         self.assertAlmostEqual(quota_backoff_seconds("'retryDelay': '14287s'"), 14287.0, delta=1)
         self.assertAlmostEqual(quota_backoff_seconds("retry in 3h58m7s"), 3 * 3600 + 58 * 60, delta=1)
 
-        tts = GeminiTTS(api_key="fake-key")
-        calls = {"n": 0}
+    def test_an_exhausted_model_falls_through_to_the_next(self):
+        from voice.gemini_tts import GeminiTTS
 
-        def boom(text, style=None):
-            calls["n"] += 1
-            raise RuntimeError("429 RESOURCE_EXHAUSTED ... 'retryDelay': '14287s'")
+        tts = GeminiTTS(api_key="fake-key", model="exhausted-model")
+        tried = []
 
-        tts._call = boom
+        def fake_call(text, style, model=None):
+            tried.append(model)
+            if model == "exhausted-model":
+                raise RuntimeError("429 RESOURCE_EXHAUSTED ... 'retryDelay': '14287s'")
+            return b"\x00\x00" * 10, 24000, 1
+
+        tts._call = fake_call
         with tempfile.TemporaryDirectory() as tmp:
             out = pathlib.Path(tmp) / "line.wav"
-            # the backoff warning is expected here; capture it instead of printing
             with self.assertLogs("voice.gemini_tts", level="WARNING"):
-                self.assertFalse(tts.synthesize("Sit up.", out))
-            self.assertFalse(tts.ready)
-            self.assertGreater(tts.backoff_remaining, 0)
-            self.assertFalse(tts.synthesize("Sit up again.", out))
-            self.assertEqual(calls["n"], 1)
+                self.assertTrue(tts.synthesize("Sit up.", out, "mild"))
+        self.assertEqual(tried[0], "exhausted-model")
+        self.assertNotEqual(tried[1], "exhausted-model")
+        self.assertEqual(tts.model_used, tried[1])
+        self.assertTrue(tts._cooling_down("exhausted-model"))
+        self.assertTrue(tts.ready)  # another model in the chain still works
+
+    def test_every_model_failing_reports_not_ready(self):
+        from voice.gemini_tts import GeminiTTS
+
+        tts = GeminiTTS(api_key="fake-key")
+
+        def always_429(text, style, model=None):
+            raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+        tts._call = always_429
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertLogs("voice.gemini_tts", level="WARNING"):
+                self.assertFalse(tts.synthesize("Sit up.", pathlib.Path(tmp) / "x.wav", "mild"))
+        self.assertFalse(tts.ready)
+        self.assertGreater(tts.backoff_remaining, 0)
+        self.assertTrue(tts.last_error)
 
 
 class TestVoiceMode(unittest.TestCase):
@@ -415,6 +433,15 @@ class TestLiveRoasts(unittest.TestCase):
         clip = service._make_live_clip("mild", {"event": "roast_due"})
         self.assertTrue(clip.text)
         self.assertEqual(clip.tier, "mild")
+
+    def test_clips_made_outside_the_pool_are_tagged_with_their_voice(self):
+        # Live roasts and fallbacks bypass the pool, which is where the tagging
+        # used to happen, so their voice never reached the database.
+        service = self._service(source="pool")
+        service._synthesize = lambda text, tier=None: "/tmp/roast_ab_gemini.wav"
+        clip = service._take_pooled("mild")
+        self.assertEqual(clip.voice, "gemini")
+        self.assertEqual(clip.path, "/tmp/roast_ab_gemini.wav")
 
 
 class TestInsultLog(unittest.TestCase):

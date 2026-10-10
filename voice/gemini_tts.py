@@ -25,6 +25,22 @@ log = logging.getLogger(__name__)
 #: the logs) on every clip the pool wants.
 MAX_BACKOFF_SECONDS = 6 * 3600
 
+#: How long to skip a model that failed for a reason other than quota (renamed,
+#: retired, not enabled for this key).
+MODEL_SKIP_SECONDS = 6 * 3600
+
+#: TTS models in preference order. Gemini's free tier limits requests *per
+#: model*, and these names change often, so the chain is the safety net: if the
+#: preferred one is out of quota or gone, the next one answers.
+DEFAULT_TTS_MODEL = "gemini-3.8-flash-lite-tts"
+FALLBACK_MODELS = (
+    "gemini-3.8-flash-lite-tts",
+    "gemini-3.8-flash-tts",
+    "gemini-3.1-flash-tts-preview",
+    "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-pro-preview-tts",
+)
+
 
 def is_quota_error(message: str) -> bool:
     text = (message or "").upper()
@@ -113,14 +129,18 @@ class GeminiTTS:
         default_mood: str = "medium",
     ):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY") or ""
-        self.model = model or os.environ.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
+        #: Preferred model; the rest of :data:`FALLBACK_MODELS` is tried after it.
+        self.model = model or os.environ.get("GEMINI_TTS_MODEL") or DEFAULT_TTS_MODEL
         self.voice = voice or os.environ.get("GEMINI_TTS_VOICE", "Kore")
         #: Overrides the shared part of voice/prompts/voice.txt when set.
         self.style = style or os.environ.get("GEMINI_TTS_STYLE") or ""
         self.default_mood = default_mood
         self._client = None
         self.last_error: Optional[str] = None
-        self._disabled_until = 0.0
+        #: model -> epoch until which it is skipped (out of quota, or renamed away)
+        self._model_cooldown: Dict[str, float] = {}
+        #: Which model actually answered last.
+        self.model_used: Optional[str] = None
 
     def style_for(self, tier: Optional[str] = None) -> str:
         """Delivery prompt for a tier: shared base plus that tier's mood.
@@ -137,14 +157,35 @@ class GeminiTTS:
     def available(self) -> bool:
         return bool(self.api_key)
 
+    def candidates(self) -> List[str]:
+        """Preferred model first, then the known fallbacks."""
+        seen: set = set()
+        out: List[str] = []
+        for model in [self.model, *FALLBACK_MODELS]:
+            if model and model not in seen:
+                seen.add(model)
+                out.append(model)
+        return out
+
+    def _cooling_down(self, model: str) -> bool:
+        until = self._model_cooldown.get(model, 0.0)
+        if not until:
+            return False
+        if time.time() >= until:
+            self._model_cooldown.pop(model, None)
+            return False
+        return True
+
     @property
     def ready(self) -> bool:
-        """False while we are sitting out a quota reset."""
-        return self.available and time.time() >= self._disabled_until
+        """True while at least one model in the chain is usable."""
+        return self.available and any(not self._cooling_down(m) for m in self.candidates())
 
     @property
     def backoff_remaining(self) -> float:
-        return max(0.0, self._disabled_until - time.time())
+        """Seconds until the soonest skipped model frees up (0 when ready)."""
+        waits = [self._model_cooldown[m] - time.time() for m in self.candidates() if self._cooling_down(m)]
+        return max(0.0, min(waits)) if waits else 0.0
 
     def _get_client(self):
         if self._client is None:
@@ -154,38 +195,50 @@ class GeminiTTS:
         return self._client
 
     def synthesize(self, text: str, out_path: str | Path, tier: Optional[str] = None) -> bool:
+        """Voice a line, walking the model chain until one answers."""
         if not text.strip():
             return False
         if not self.available:
             self.last_error = "no GEMINI_API_KEY"
             return False
-        if not self.ready:
-            self.last_error = f"quota backoff, {int(self.backoff_remaining // 60)} min left"
-            return False
-        try:
-            pcm, sample_rate, channels = self._call(text, self.style_for(tier))
-            if not pcm:
-                self.last_error = "empty audio response"
-                return False
-            wavutil.write_wav(out_path, pcm, sample_rate=sample_rate, channels=channels, sample_width=2)
-            wavutil.normalize(out_path)
-            self.last_error = None
-            return True
-        except Exception as exc:
-            message = str(exc)
-            self.last_error = message
-            if is_quota_error(message):
-                delay = quota_backoff_seconds(message)
-                self._disabled_until = time.time() + delay
+
+        style = self.style_for(tier)
+        problems: List[str] = []
+        for model in self.candidates():
+            if self._cooling_down(model):
+                continue
+            try:
+                pcm, sample_rate, channels = self._call(text, style, model)
+            except Exception as exc:
+                message = str(exc)
+                quota = is_quota_error(message)
+                delay = quota_backoff_seconds(message) if quota else MODEL_SKIP_SECONDS
+                self._model_cooldown[model] = time.time() + delay
+                problems.append(f"{model}: {'quota' if quota else message[:80]}")
                 log.warning(
-                    "Gemini TTS quota reached; using the local voice for %.0f min",
+                    "Gemini TTS model %s unavailable (%s); skipping it for %.0f min",
+                    model,
+                    "quota" if quota else message[:80],
                     delay / 60.0,
                 )
-            else:
-                log.warning("Gemini TTS failed (%s); falling back to local TTS", message)
-            return False
+                continue
+            if not pcm:
+                self._model_cooldown[model] = time.time() + MODEL_SKIP_SECONDS
+                problems.append(f"{model}: empty audio")
+                continue
 
-    def _call(self, text: str, style: str):
+            wavutil.write_wav(out_path, pcm, sample_rate=sample_rate, channels=channels, sample_width=2)
+            wavutil.normalize(out_path)
+            if self.model_used != model:
+                log.info("Gemini TTS is speaking with %s", model)
+            self.model_used = model
+            self.last_error = None
+            return True
+
+        self.last_error = "; ".join(problems)[:400] or "all Gemini TTS models are cooling down"
+        return False
+
+    def _call(self, text: str, style: str, model: Optional[str] = None):
         from google.genai import types
 
         client = self._get_client()
@@ -206,7 +259,7 @@ class GeminiTTS:
             config_kwargs["speech_config"] = speech_config
 
         response = client.models.generate_content(
-            model=self.model,
+            model=model or self.model,
             contents=prompt,
             config=types.GenerateContentConfig(**config_kwargs),
         )

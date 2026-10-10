@@ -1,7 +1,7 @@
 /* Posture Coach — fullscreen feed with a flat translucent HUD.
-   Chrome is set in Overpass Mono (labels, numbers, controls); prose — roast
-   captions and the hall of shame — is set in Overpass. Sharp corners, hairline
-   borders, no blur, no shadows. */
+   Chrome is set in Overpass Mono (labels, numbers, controls); prose — the roast
+   captions — is set in Overpass. Sharp corners, hairline borders, and a frosted
+   blur behind each surface. */
 
 :root {
   --ink:      #e9ebef;
@@ -351,20 +351,6 @@ body.is-fullscreen .icon-exit { display: block; }
 .warn { color: var(--warn); }
 .none { color: var(--faint); }
 .bad  { color: var(--bad); }
-
-/* ----------------------------------------------------------- panel: roasts */
-.roasts { margin: 0; padding-left: 17px; }
-.roasts li { padding: 5px 0; font-size: 12.5px; line-height: 1.35; }
-.roasts li::marker { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
-.roasts .meta {
-  display: block;
-  margin-top: 2px;
-  font-family: var(--mono);
-  font-size: 9.5px;
-  letter-spacing: 0.05em;
-  color: var(--faint);
-}
-.roasts .empty { list-style: none; margin-left: -17px; color: var(--faint); }
 
 /* --------------------------------------------------------- panel: controls */
 .btn-row { display: flex; gap: 8px; }

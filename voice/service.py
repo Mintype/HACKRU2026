@@ -120,7 +120,8 @@ class RoastService:
         if clip is not None:
             return clip
         text = self._fallback_text(tier)
-        return Clip(text=text, tier=tier, path=self._synthesize(text, tier), source="fallback")
+        path = self._synthesize(text, tier)
+        return Clip(text=text, tier=tier, path=path, source="fallback", voice=self._voice_from_path(path))
 
     # -- live generation --------------------------------------------------
     def _roast_source(self) -> str:
@@ -177,7 +178,8 @@ class RoastService:
             if pooled is not None:
                 return pooled
         text = self._personalise_text(item["text"])
-        return Clip(text=text, tier=tier, path=self._synthesize(text, tier), source=source)
+        path = self._synthesize(text, tier)
+        return Clip(text=text, tier=tier, path=path, source=source, voice=self._voice_from_path(path))
 
     # -- internals --------------------------------------------------------
     def _deliver(self, clip: Clip, event: Dict) -> Optional[Clip]:

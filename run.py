@@ -204,11 +204,13 @@ def test_voice_command(text: str) -> int:
     print(f"  line         : {text!r}\n")
 
     if gemini.available and gemini.synthesize(text, out):
+        print(f"  spoke with   : {gemini.model_used or gemini.model}")
         print(f"  wrote        : {out}  ({out.stat().st_size} bytes)")
         _play(out)
         return 0
     if gemini.available:
-        print(f"  Gemini TTS failed: {gemini.last_error}")
+        print(f"  tried        : {', '.join(gemini.candidates())}")
+        print(f"  Gemini TTS failed: {(gemini.last_error or '')[:300]}")
 
     local = LocalTTS()
     print(f"  local engine : {local.engine or 'none available'}")
