@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -92,6 +93,46 @@ class TestDatabase(unittest.TestCase):
         stats = self.db.session_stats(self.session)
         self.assertEqual(stats["readings"], 0)
         self.assertEqual(stats["roasts"], 0)
+
+    def test_recent_roasts_include_test_roasts_with_no_session(self):
+        # What the Test roast button does while nobody is seated: no session id.
+        self.db.log_roast(None, 5.0, "Test line", "mild", "fallback", voice="local", origin="test")
+        self.db.log_roast(self.session, 6.0, "Auto line", "mild", "gemini", 1, 30.0, voice="gemini", origin="auto")
+
+        recent = self.db.recent_roasts()
+        self.assertEqual([r["text"] for r in recent], ["Auto line", "Test line"])
+        self.assertEqual(recent[0]["origin"], "auto")
+        self.assertEqual(recent[1]["origin"], "test")
+        self.assertEqual(recent[1]["voice"], "local")
+        # session-scoped queries still ignore the untethered one
+        self.assertEqual([r["text"] for r in self.db.session_roasts(self.session)], ["Auto line"])
+
+    def test_an_older_database_gains_the_new_columns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "old.db"
+            conn = sqlite3.connect(str(path))
+            conn.executescript(
+                """
+                CREATE TABLE sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, started_at REAL NOT NULL,
+                    ended_at REAL, neck_baseline REAL, torso_baseline REAL,
+                    slouch_count INTEGER DEFAULT 0, roasts INTEGER DEFAULT 0, notes TEXT);
+                CREATE TABLE roasts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER,
+                    ts REAL NOT NULL, text TEXT NOT NULL, tier TEXT, source TEXT,
+                    slouch_count INTEGER, neck_angle REAL);
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            migrated = Database(path)
+            columns = {row[1] for row in migrated._conn().execute("PRAGMA table_info(roasts)")}
+            self.assertIn("voice", columns)
+            self.assertIn("origin", columns)
+            migrated.log_roast(None, 1.0, "After migration", voice="local", origin="test")
+            self.assertEqual(migrated.recent_roasts()[0]["voice"], "local")
+            migrated.close()
 
 
 class TestSettings(unittest.TestCase):

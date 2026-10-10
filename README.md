@@ -290,7 +290,7 @@ turn off, and the arrangement is remembered in the browser's `localStorage`.
 | **Score** | score over the session with roast markers (resizable) |
 | **Controls** | calibrate, test roast, nice mode, thresholds and audio route |
 | **System** | camera/backend, fps, Nest, audio route, Gemini text + voice, local TTS, pool |
-| **Hall of shame** | this session's roasts, newest first, with tier and angle |
+| **Hall of shame** | recent roasts, newest first — test and automatic, with tier, voice and angle |
 
 The top bar carries the state plate (away → good → slouch → warn → roast), the
 session clock and the live rate, then three icon buttons:

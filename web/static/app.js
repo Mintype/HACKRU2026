@@ -585,13 +585,19 @@
   function renderRoasts(items) {
     const list = $("shame-list");
     if (!items.length) {
-      list.innerHTML = '<li class="empty">No roasts this session.</li>';
+      list.innerHTML = '<li class="empty">Nothing said yet.</li>';
       return;
     }
     list.innerHTML = items
       .slice(0, 12)
       .map((r) => {
-        const bits = [r.tier, r.source, r.neck_angle != null ? `neck ${Number(r.neck_angle).toFixed(0)}\u00b0` : null].filter(Boolean);
+        const bits = [
+          r.origin === "test" ? "test" : null,
+          r.tier,
+          r.source,
+          r.voice,
+          r.neck_angle != null ? `neck ${Number(r.neck_angle).toFixed(0)}\u00b0` : null,
+        ].filter(Boolean);
         return `<li>${escapeHtml(r.text)}<span class="meta">${escapeHtml(bits.join("  \u00b7  "))}</span></li>`;
       })
       .join("");

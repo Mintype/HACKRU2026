@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS roasts (
     source      TEXT,
     slouch_count INTEGER,
     neck_angle  REAL,
+    voice       TEXT,
+    origin      TEXT,
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
@@ -89,9 +91,21 @@ class Database:
         conn = sqlite3.connect(str(self.path), timeout=15)
         try:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
             conn.commit()
         finally:
             conn.close()
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Add columns introduced after a database was first created."""
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(roasts)")}
+        for column, ddl in (
+            ("voice", "ALTER TABLE roasts ADD COLUMN voice TEXT"),
+            ("origin", "ALTER TABLE roasts ADD COLUMN origin TEXT"),
+        ):
+            if column not in existing:
+                conn.execute(ddl)
 
     def close(self) -> None:
         conn = getattr(self._local, "conn", None)
@@ -167,12 +181,15 @@ class Database:
         source: Optional[str] = None,
         slouch_count: Optional[int] = None,
         neck_angle: Optional[float] = None,
+        voice: Optional[str] = None,
+        origin: str = "auto",
     ) -> int:
         conn = self._conn()
         cur = conn.execute(
-            """INSERT INTO roasts (session_id, ts, text, tier, source, slouch_count, neck_angle)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (session_id, float(ts), text, tier, source, slouch_count, neck_angle),
+            """INSERT INTO roasts
+               (session_id, ts, text, tier, source, slouch_count, neck_angle, voice, origin)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (session_id, float(ts), text, tier, source, slouch_count, neck_angle, voice, origin),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -196,9 +213,22 @@ class Database:
         if session_id is None:
             return []
         rows = self._conn().execute(
-            """SELECT ts, text, tier, source, slouch_count, neck_angle FROM roasts
-               WHERE session_id = ? ORDER BY ts DESC LIMIT ?""",
+            """SELECT ts, text, tier, source, voice, origin, slouch_count, neck_angle
+               FROM roasts WHERE session_id = ? ORDER BY ts DESC LIMIT ?""",
             (int(session_id), int(limit)),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def recent_roasts(self, limit: int = 25) -> List[Dict]:
+        """Every roast, newest first, regardless of session.
+
+        The hall of shame uses this so test roasts - and anything said while no
+        session was running, which has no session id - still show up.
+        """
+        rows = self._conn().execute(
+            """SELECT ts, text, tier, source, voice, origin, slouch_count, neck_angle
+               FROM roasts ORDER BY ts DESC LIMIT ?""",
+            (int(limit),),
         ).fetchall()
         return [dict(r) for r in rows]
 

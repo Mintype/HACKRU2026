@@ -171,6 +171,7 @@ class Coach:
             self.roast_service.on_roast_due(event)
 
     def _on_roast_played(self, clip, event: Dict) -> None:
+        origin = "test" if (event or {}).get("event") == "test_roast" else "auto"
         try:
             self.db.log_roast(
                 self.vision.session_id,
@@ -180,6 +181,8 @@ class Coach:
                 clip.source,
                 (event or {}).get("slouch_count"),
                 (event or {}).get("worst_neck_angle"),
+                voice=getattr(clip, "voice", None),
+                origin=origin,
             )
         except Exception:
             log.warning("could not log roast", exc_info=True)
@@ -190,6 +193,8 @@ class Coach:
                 "text": clip.text,
                 "tier": clip.tier,
                 "source": clip.source,
+                "voice": getattr(clip, "voice", None),
+                "origin": origin,
                 "slouch_count": (event or {}).get("slouch_count"),
                 "neck_angle": (event or {}).get("worst_neck_angle"),
                 "state": self.state_machine.state,
@@ -325,8 +330,9 @@ def create_app(
 
     @app.get("/api/roasts")
     def api_roasts():
-        session_id = coach.vision.session_id
-        return jsonify({"session_id": session_id, "roasts": coach.db.session_roasts(session_id)})
+        # The hall of shame is "what has it said lately", so it spans sessions
+        # and includes test roasts (which may have no session at all).
+        return jsonify({"session_id": coach.vision.session_id, "roasts": coach.db.recent_roasts(25)})
 
     @app.get("/api/status")
     def api_status():
