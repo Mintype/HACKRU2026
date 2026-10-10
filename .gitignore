@@ -26,6 +26,11 @@ Thumbs.db
 # --- Scratch --------------------------------------------------------------
 guide.txt
 *.log
+# scratch dirs used when verifying (screenshots, throwaway data dirs)
+.verify/
+.shots/
+.smoke-data/
+.live-check/
 
 # smoke test scratch
 .smoke-data/

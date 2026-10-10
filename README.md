@@ -169,7 +169,7 @@ the app.
 The **delivery** is not a prompt: ElevenLabs takes `voice_settings`, so the tier
 of an insult maps to stability/style numbers (see the table below).
 
-**Never repeating.** Every insult actually said is appended to
+**Never repeating, and never boring.** Every insult actually said is appended to
 `data/insults.txt`, one per line. That ledger is enforced in four places:
 
 1. its most recent lines are sent to Gemini as banned in the prompt
@@ -178,7 +178,13 @@ of an insult maps to stability/style numbers (see the table below).
 4. the pool refuses to queue a line already said, or already queued
 
 Exclusions are ordered most-relevant-first (just played → queued → history),
-because only the head of that list is shown to the model.
+because only the head of that list is shown to the model (the 40 most recent).
+
+On top of that, every batch is given a **writing angle** chosen at random from
+`voice/roasts.py:TOPICS` — write as the chair, blame gravity, write as their back's
+warranty department — so consecutive roasts do not all sound the same. The
+offline fallback pools are ~20 lines per tier (plus 10 neck- and 10 torso-specific
+lines) so the hand-written set does not run dry quickly either.
 
 ### 5. Where a roast comes from
 
@@ -230,10 +236,11 @@ sit down ──2s─▶ seated ──5s─▶ calibrated ──▶ slouch ──
 ```
 
 There is no warning stage: the first sign of slouching is the website turning
-amber, and a roast follows at `roast_seconds`. Then `cooldown_seconds` before
-another. Because the score trigger is deliberately faster, a *steep* slouch roasts
-after ~3 s rather than waiting the full 10 — that is expected, not a bug. Set
-`bad_score_threshold` to `0` to use only the sustained timer.
+amber, and a roast follows at `roast_seconds`. After a roast, `cooldown_seconds`
+before the next one — so with the defaults, a continuous slouch is roasted every
+10 seconds. Because the score trigger is deliberately faster, a *steep* slouch
+roasts after ~3 s rather than waiting the full 10 — that is expected, not a bug.
+Set `bad_score_threshold` to `0` to use only the sustained timer.
 
 Check the real numbers instead of guessing:
 
@@ -275,12 +282,17 @@ t= 15.3s  roast_due   reason=sustained_slouch  slouch#1  part=neck  score=0.55
 Everything in this section is editable at runtime on the website under
 **Controls**, and is persisted to `data/settings.json`.
 
+The file records a `__version__`. When a default changes, an older file is
+migrated so the new default actually takes effect, while the values you tuned by
+hand (camera, mirror, voice) are preserved. That matters: a settings file silently
+overrides a changed default, which is how a "10 second" roast can keep taking 30.
+
 ### Timing and threshold settings
 
 | Setting | Default | Range | Meaning |
 | ------- | ------- | ----- | ------- |
 | `roast_seconds` | `10` | 2–3600 | Continuous slouching before a roast (the *sustained* trigger). Reset by `good_debounce_seconds` of good posture. |
-| `cooldown_seconds` | `90` | 0–3600 | Minimum gap between two roasts. Blocks the *audio*, not the tracking — the state, the chart and the website keep updating. |
+| `cooldown_seconds` | `10` | 0–3600 | Minimum gap between two roasts. With the defaults you are roasted every 10 s while you keep slouching. Blocks the *audio*, not the tracking — the state, the chart and the website keep updating. |
 | `good_debounce_seconds` | `2` | 0–60 | How long good posture must hold before the slouch episode is considered over. Stops a brief sit-up from dodging a roast. |
 | `calibration_seconds` | `5` | 1–60 | Length of the upright baseline capture at the start of a session (or when *Calibrate* is pressed). |
 | `lower_threshold` | `0.70` | 0.05–1.0 | Score **below** this ⇒ slouching. This is the "enter slouch" edge of the hysteresis. |
@@ -349,6 +361,7 @@ offender does not sound like a first slip.
 | `max_batch` | `4` | Most clips generated in one pass, so one refill cannot block for long. |
 | `max_exclude` | `300` | Ledger lines retained as exclusions; the prompt shows the 25 most recent. |
 | `MAX_WORDS` | `14` | Generated lines longer than this are dropped. The prompt asks for 6–12 words. |
+| `TOPICS` | 16 angles | Writing angles handed to the model one batch at a time, so roasts vary. |
 
 ### Audio and camera settings
 

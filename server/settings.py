@@ -16,7 +16,7 @@ from .state_machine import StateMachineConfig
 DEFAULTS: Dict[str, Any] = {
     # state machine
     "roast_seconds": 10.0,
-    "cooldown_seconds": 90.0,
+    "cooldown_seconds": 10.0,
     "good_debounce_seconds": 2.0,
     "calibration_seconds": 5.0,
     "lower_threshold": 0.7,
@@ -61,12 +61,23 @@ ROAST_SOURCES = ("live", "pool")
 TTS_MODES = ("auto", "elevenlabs", "local")
 MODELS = ("lite", "full", "heavy")
 
+#: Bump this whenever a default changes, so an existing settings.json cannot keep
+#: overriding the new value for ever.
+SETTINGS_VERSION = 2
+
+#: version -> the values to force onto files older than it. Everything the user
+#: tuned by hand (camera index, mirror, voice) is preserved.
+MIGRATIONS: Dict[int, Dict[str, Any]] = {
+    1: {"roast_seconds": 10.0, "cooldown_seconds": 10.0},
+}
+
 
 class Settings:
     def __init__(self, path: Optional[str | Path] = None, overrides: Optional[Dict[str, Any]] = None):
         self.path = Path(path or config.SETTINGS_PATH)
         self._lock = threading.Lock()
         self._values = dict(DEFAULTS)
+        self._version = SETTINGS_VERSION
         self._load()
         if overrides:
             for key, value in overrides.items():
@@ -76,19 +87,31 @@ class Settings:
     # -- persistence ------------------------------------------------------
     def _load(self) -> None:
         try:
-            if self.path.exists():
-                stored = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(stored, dict):
-                    for key, value in stored.items():
-                        if key in self._values:
-                            self._values[key] = value
+            if not self.path.exists():
+                return
+            stored = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(stored, dict):
+                return
+            try:
+                self._version = int(stored.get("__version__", 1))
+            except (TypeError, ValueError):
+                self._version = 1
+            for key, value in stored.items():
+                if key in self._values:
+                    self._values[key] = value
+            if self._version < SETTINGS_VERSION:
+                for from_version in range(self._version, SETTINGS_VERSION):
+                    self._values.update(MIGRATIONS.get(from_version, {}))
+                self._version = SETTINGS_VERSION
+                self._save()
         except Exception:
             pass
 
     def _save(self) -> None:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(self._values, indent=2), encoding="utf-8")
+            payload = {"__version__": self._version, **self._values}
+            self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except Exception:
             pass
 

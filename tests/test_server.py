@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -5,7 +6,7 @@ from pathlib import Path
 
 from fakes.fake_readings import scripted_readings
 from server.db import Database
-from server.settings import Settings
+from server.settings import SETTINGS_VERSION, Settings
 from server.state_machine import StateMachineConfig
 from voice.pool import RoastPool
 
@@ -187,6 +188,34 @@ class TestSettings(unittest.TestCase):
         settings.update({"roast_source": "nonsense", "bad_score_threshold": 5})
         self.assertEqual(settings.get("roast_source"), "live")
         self.assertEqual(settings.get("bad_score_threshold"), 1.0)
+
+    def test_an_old_settings_file_gets_the_new_defaults(self):
+        # A v1 file still holding the old roast/cooldown times, plus values the
+        # user tuned by hand, which must survive.
+        self.path.write_text(
+            json.dumps(
+                {
+                    "__version__": 1,
+                    "roast_seconds": 30.0,
+                    "cooldown_seconds": 90.0,
+                    "camera_index": 2,
+                    "mirror": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        settings = Settings(path=self.path)
+        self.assertEqual(settings.get("roast_seconds"), 10.0)
+        self.assertEqual(settings.get("cooldown_seconds"), 10.0)
+        self.assertEqual(settings.get("camera_index"), 2)
+        self.assertTrue(settings.get("mirror"))
+        stored = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(stored["__version__"], SETTINGS_VERSION)
+
+    def test_current_settings_are_not_migrated_again(self):
+        settings = Settings(path=self.path)
+        settings.update({"roast_seconds": 45.0})
+        self.assertEqual(Settings(path=self.path).get("roast_seconds"), 45.0)
 
     def test_apply_to_machine_config(self):
         settings = Settings(path=self.path)

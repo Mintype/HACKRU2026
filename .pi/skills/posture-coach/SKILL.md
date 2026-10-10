@@ -83,6 +83,11 @@ Other events: `session_start`, `calibrated`, `good`, `session_end`, `state`.
   hud skill — run it after touching the UI.
 - Bump the `localStorage` layout key in `web/static/app.js` (`posturecoach.hud.vN`)
   whenever default panel positions change, or existing users keep the old defaults.
+- **Changing a default in `server/settings.py` is not enough.** `data/settings.json`
+  overrides it, so an existing file keeps the old value for ever. Bump
+  `SETTINGS_VERSION` and add an entry to `MIGRATIONS` for the version you are
+  moving from; values the user tuned by hand are preserved. This is how a "10
+  second" roast can otherwise keep taking 30.
 
 ## Working agreements
 

@@ -114,6 +114,7 @@ class TestStateMachine(unittest.TestCase):
         self.assertIsNone(self.machine.slouch_since)
 
     def test_cooldown_blocks_repeat_roasts(self):
+        self.machine.config.cooldown_seconds = 90.0  # explicit: this tests the gate itself
         start = with_session(self.machine)
         first = feed(self.machine, start, 11, 0.5)
         due = [e for e in first if e["event"] == "roast_due"]

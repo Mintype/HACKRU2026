@@ -33,6 +33,12 @@ ORIGINALITY
 Every line must be brand new. The list below is everything already said — never
 reuse, reword or lightly paraphrase any of it. If nothing new comes to mind,
 change the angle completely rather than remixing an old line.
+Do not open two lines the same way, and vary the shape of the sentences.
+
+THIS BATCH'S ANGLE
+{{TOPIC}}
+Build every line in this batch from that angle, but keep the lines distinct from
+each other.
 
 ALREADY SAID — banned
 {{EXCLUDE}}

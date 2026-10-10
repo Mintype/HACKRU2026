@@ -119,6 +119,20 @@ class TestPromptAndValidation(unittest.TestCase):
             for line in roasts.tier_pool(tier):
                 self.assertLessEqual(len(line.split()), MAX_WORDS, line)
 
+    def test_fallback_pools_are_large_enough_to_avoid_quick_repeats(self):
+        self.assertGreaterEqual(len(roasts.MILD), 15)
+        self.assertGreaterEqual(len(roasts.MEDIUM), 15)
+        self.assertGreaterEqual(len(roasts.SPICY), 15)
+        self.assertGreaterEqual(len(roasts.NICE), 10)
+
+    def test_prompt_carries_a_writing_angle(self):
+        from voice.roasts import TOPICS
+
+        prompt = build_prompt(count=3, tier="mild")
+        self.assertTrue(any(topic in prompt for topic in TOPICS), prompt[:400])
+        chosen = build_prompt(count=3, tier="mild", topic="Write as the chair.")
+        self.assertIn("Write as the chair.", chosen)
+
     def test_parse_plain_json(self):
         raw = json.dumps({"roasts": [{"text": "Sit up.", "tier": "mild"}]})
         self.assertEqual(parse_roasts(raw), [{"text": "Sit up.", "tier": "mild"}])

@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-from .roasts import fallback_batch
+from .roasts import fallback_batch, pick_topic
 
 log = logging.getLogger(__name__)
 
@@ -154,6 +154,7 @@ def build_prompt(
     nice: bool = False,
     context: Optional[Dict] = None,
     exclude: Sequence[str] = (),
+    topic: Optional[str] = None,
 ) -> str:
     """Render the prompt template for this batch."""
     context = context or {}
@@ -161,7 +162,7 @@ def build_prompt(
     tier_key = "nice" if nice else tier
 
     context_text = "\n".join(_context_lines(context)) or "- First slouch; no session history yet."
-    exclude_text = "\n".join(f"- {line}" for line in list(exclude)[:25]) or "- (nothing yet)"
+    exclude_text = "\n".join(f"- {line}" for line in list(exclude)[:40]) or "- (nothing yet)"
 
     return (
         template.replace("{{COUNT}}", str(int(count)))
@@ -169,6 +170,7 @@ def build_prompt(
         .replace("{{TIER_BRIEF}}", TIER_BRIEF.get(tier_key, TIER_BRIEF["mild"]))
         .replace("{{CONTEXT}}", context_text)
         .replace("{{EXCLUDE}}", exclude_text)
+        .replace("{{TOPIC}}", topic or pick_topic())
     )
 
 

@@ -16,9 +16,9 @@ Read `posture-coach` first for layout and contracts.
 | `voice/prompts/nice.txt` | nice mode: encouragement |
 
 Templates use `{{TOKEN}}` placeholders (`{{CONTEXT}}`, `{{EXCLUDE}}`, `{{COUNT}}`,
-`{{TIER}}`, `{{TIER_BRIEF}}`) substituted with plain `str.replace` — **not**
-`str.format`, because the templates contain literal JSON braces. Each file has a
-built-in fallback, so a missing file can never break the app.
+`{{TIER}}`, `{{TIER_BRIEF}}`, `{{TOPIC}}`) substituted with plain `str.replace` —
+**not** `str.format`, because the templates contain literal JSON braces. Each file
+has a built-in fallback, so a missing file can never break the app.
 
 The spoken **mood** is not a text prompt any more: ElevenLabs takes
 `voice_settings`, so the tier maps to numbers in `voice/eleven_tts.py:
@@ -50,15 +50,24 @@ python .pi/skills/posture-coach-voice/scripts/probe_tts.py --live # one real req
 `data/insults.txt` is the ledger: one insult per line, appended when a roast is
 actually played. It is enforced in four places, and all four must keep working:
 
-- the most recent lines are passed to the model as banned (`{{EXCLUDE}}`)
+- the most recent lines (40 of them) are passed to the model as banned
 - `validate()` drops any generated line that matches
 - `fallback_batch()` skips used lines
 - the pool refuses to queue a line that is already said **or already queued**
 
 Exclusions are ordered **most relevant first** (just played → queued → history)
-because only the head of the list is shown to the model. The hand-written fallback
-pool is finite, so once a tier is exhausted it degrades to a repeat rather than
-going silent — the model is what provides unlimited originals.
+because only the head of the list is shown to the model.
+
+Originality comes from two more levers:
+
+- **A writing angle per batch.** `gemini_text.build_prompt` fills the `{{TOPIC}}`
+  token with a random entry from `voice/roasts.py:TOPICS` (write as the chair,
+  blame gravity, write as their back's warranty department…), so batches do not
+  converge on the same joke. Add angles by adding to `TOPICS`.
+- **Substantial offline pools.** ~20 lines per tier plus 10 neck- and 10
+  torso-specific lines, because the hand-written set is finite: once a tier is
+  exhausted it degrades to a repeat rather than going silent. Gemini is what
+  provides unlimited originals.
 
 ## Invariants
 
