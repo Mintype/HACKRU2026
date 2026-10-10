@@ -22,10 +22,17 @@ class Clip:
     tier: str = "mild"
     path: Optional[str] = None
     source: str = "gemini"
+    voice: Optional[str] = None  # which engine voiced it: gemini / local / unknown
     created_at: float = field(default_factory=time.time)
 
     def as_dict(self) -> Dict:
-        return {"text": self.text, "tier": self.tier, "path": self.path, "source": self.source}
+        return {
+            "text": self.text,
+            "tier": self.tier,
+            "path": self.path,
+            "source": self.source,
+            "voice": self.voice,
+        }
 
 
 class RoastPool(threading.Thread):
@@ -41,6 +48,7 @@ class RoastPool(threading.Thread):
         text_source: Callable[[str, int], List[Dict]],
         synthesize: Callable[[str], Optional[str]],
         context_provider: Optional[Callable[[], Dict]] = None,
+        voice_of: Optional[Callable[[Optional[str]], Optional[str]]] = None,
         tiers: Sequence[str] = ("mild", "medium", "spicy"),
         size: int = 9,
         refill_interval: float = 1.5,
@@ -51,6 +59,7 @@ class RoastPool(threading.Thread):
         self.text_source = text_source
         self.synthesize = synthesize
         self.context_provider = context_provider
+        self.voice_of = voice_of
         self.tiers = tuple(tiers)
         self.size = max(1, int(size))
         self.refill_interval = float(refill_interval)
@@ -83,6 +92,24 @@ class RoastPool(threading.Thread):
         with self._lock:
             return {tier: len(bucket) for tier, bucket in self._buckets.items()}
 
+    def voice_counts(self) -> Dict[str, int]:
+        """How the ready clips are voiced — makes a mixed pool visible."""
+        with self._lock:
+            out: Dict[str, int] = {}
+            for bucket in self._buckets.values():
+                for clip in bucket:
+                    key = clip.voice or "none"
+                    out[key] = out.get(key, 0) + 1
+            return out
+
+    def clear(self) -> int:
+        """Drop every ready clip (used when the voice mode changes)."""
+        with self._lock:
+            dropped = sum(len(bucket) for bucket in self._buckets.values())
+            for bucket in self._buckets.values():
+                bucket.clear()
+            return dropped
+
     @property
     def ready(self) -> int:
         return sum(self.counts().values())
@@ -94,6 +121,7 @@ class RoastPool(threading.Thread):
             "counts": self.counts(),
             "generated": self.generated,
             "failures": self.failures,
+            "voices": self.voice_counts(),
             "last_refill_at": self.last_refill_at,
             "running": self.is_alive() and not self._stop.is_set(),
         }
@@ -144,6 +172,7 @@ class RoastPool(threading.Thread):
                     tier=str(item.get("tier") or tier),
                     path=path,
                     source=str(item.get("source") or "gemini"),
+                    voice=(self.voice_of(path) if self.voice_of else None),
                 )
                 with self._lock:
                     self._buckets[tier].append(clip)

@@ -196,6 +196,13 @@
             <option value="off">Off</option>
           </select>
         </div>
+        <div class="field wide"><label for="tts_mode">Voice</label>
+          <select id="tts_mode" name="tts_mode">
+            <option value="auto">Auto &mdash; Gemini when available</option>
+            <option value="gemini">Gemini only</option>
+            <option value="local">Local only (consistent, offline)</option>
+          </select>
+        </div>
         <button type="submit" class="btn wide">Save</button>
       </form>
       <p id="settings-status" class="note"></p>
@@ -223,6 +230,7 @@
         <li><span>Gemini text</span><b id="sys-gemini">&mdash;</b></li>
         <li><span>Gemini voice</span><b id="sys-tts">&mdash;</b></li>
         <li><span>Local voice</span><b id="sys-local">&mdash;</b></li>
+        <li><span>Voice mix</span><b id="sys-voice">&mdash;</b></li>
         <li><span>Roast pool</span><b id="sys-pool">&mdash;</b></li>
       </ul>
     </div>

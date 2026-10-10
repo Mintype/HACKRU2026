@@ -29,6 +29,7 @@ DEFAULTS: Dict[str, Any] = {
     # voice / website
     "nice_mode": False,
     "mirror": False,
+    "tts_mode": "auto",  # auto | gemini | local  (force one for a consistent voice)
     "audio_route": "bluetooth",  # bluetooth | cast | off
     # Clips are pre-generated with Gemini TTS, whose free tier allows only ~10
     # requests/day, so the default pool is small enough to fit a daily quota.
@@ -51,6 +52,7 @@ BOUNDS: Dict[str, tuple] = {
 }
 
 AUDIO_ROUTES = ("bluetooth", "cast", "off")
+TTS_MODES = ("auto", "gemini", "local")
 MODELS = ("lite", "full", "heavy")
 
 
@@ -125,6 +127,9 @@ class Settings:
         if key == "audio_route":
             text = str(value).strip().lower()
             return text if text in AUDIO_ROUTES else DEFAULTS[key]
+        if key == "tts_mode":
+            text = str(value).strip().lower()
+            return text if text in TTS_MODES else DEFAULTS[key]
         if key == "model":
             text = str(value).strip().lower()
             return text if text in MODELS else DEFAULTS[key]

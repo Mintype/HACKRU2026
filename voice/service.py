@@ -57,6 +57,7 @@ class RoastService:
             text_source=self._text_source,
             synthesize=self._synthesize,
             context_provider=self.context_provider,
+            voice_of=self._voice_from_path,
             tiers=TIERS,
             size=pool_size,
             log_fn=log_fn,
@@ -158,16 +159,52 @@ class RoastService:
             item["text"] = self._personalise_text(item["text"])
         return items[:count]
 
+    def _tts_mode(self) -> str:
+        """auto = Gemini when it can, else local; or force one for consistency."""
+        if self.settings is None:
+            return "auto"
+        mode = str(self.settings.get("tts_mode") or "auto").lower()
+        return mode if mode in {"auto", "gemini", "local"} else "auto"
+
+    @staticmethod
+    def _voice_from_path(path: Optional[str]) -> Optional[str]:
+        if not path:
+            return None
+        name = str(path)
+        if name.endswith("_gemini.wav"):
+            return "gemini"
+        if name.endswith("_local.wav"):
+            return "local"
+        return "unknown"
+
     def _synthesize(self, text: str) -> Optional[str]:
+        """Voice one line, honouring the voice-mode setting.
+
+        The voice is part of the filename, so the cache is voice-aware and a
+        clip made by one engine is never mistaken for the other. Clips are
+        pre-generated, so the mix is decided by whichever engine is available
+        while the pool is filling.
+        """
+        mode = self._tts_mode()
         digest = hashlib.md5(text.encode("utf-8")).hexdigest()[:10]
-        path = config.ROAST_DIR / f"roast_{digest}.wav"
-        if path.exists() and path.stat().st_size > 0:
-            return str(path)
-        if self.tts.ready and self.tts.synthesize(text, path):
-            return str(path)
-        if self.local_tts.available and self.local_tts.synthesize(text, path):
-            return str(path)
-        return None
+
+        def attempt(voice: str) -> Optional[str]:
+            path = config.ROAST_DIR / f"roast_{digest}_{voice}.wav"
+            if path.exists() and path.stat().st_size > 0:
+                return str(path)
+            if voice == "gemini":
+                if mode == "local" or not self.tts.ready:
+                    return None
+                return str(path) if self.tts.synthesize(text, path) else None
+            if mode == "gemini" or not self.local_tts.available:
+                return None
+            return str(path) if self.local_tts.synthesize(text, path) else None
+
+        if mode == "local":
+            return attempt("local")
+        if mode == "gemini":
+            return attempt("gemini")
+        return attempt("gemini") or attempt("local")
 
     # -- status -----------------------------------------------------------
     def status(self) -> Dict:
@@ -180,6 +217,7 @@ class RoastService:
             "gemini_tts_ready": getattr(self.tts, "ready", self.tts.available),
             "gemini_tts_error": self.tts.last_error,
             "local_tts": self.local_tts.engine,
+            "tts_mode": self._tts_mode(),
             "nice_mode": self._nice(),
             "recent": recent[-5:],
             "pool": self.pool.status(),

@@ -376,6 +376,11 @@ def create_app(
             coach.detector.tolerance = float(applied["delta_angle"])
         if "audio_route" in applied:
             coach.player.set_route(str(applied["audio_route"]))
+        if "tts_mode" in applied:
+            # Ready clips have the old voice baked in, so drop them and let the
+            # pool refill with the chosen engine.
+            dropped = coach.roast_service.pool.clear()
+            log.info("tts_mode -> %s; cleared %d pooled clips", applied["tts_mode"], dropped)
         if "cast_name" in applied:
             coach.player.cast_name = str(applied["cast_name"]) or None
         coach.broker.publish({"kind": "settings", "settings": coach.settings.as_dict()})

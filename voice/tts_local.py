@@ -19,8 +19,15 @@ log = logging.getLogger(__name__)
 
 
 class LocalTTS:
-    def __init__(self, voice: str = "en", rate: int = 165):
-        self.voice = voice
+    """Offline text-to-speech.
+
+    ``voice`` is engine-specific and may also come from ``POSTURE_LOCAL_VOICE``:
+    an espeak voice name (``en``) or a Windows voice (``Microsoft Zira Desktop``).
+    Set it when you want the local fallback to match the Gemini voice.
+    """
+
+    def __init__(self, voice: Optional[str] = None, rate: int = 165):
+        self.voice = voice or os.environ.get("POSTURE_LOCAL_VOICE") or "en"
         self.rate = rate
         self.engine: Optional[str] = self._detect()
 
@@ -71,11 +78,15 @@ class LocalTTS:
         if self.engine == "say":
             return ["say", "-o", str(path), "--data-format=LEI16@22050", text]
         if self.engine == "sapi":
+            select = ""
+            if self.voice and self.voice.lower() not in {"en", "default"}:
+                select = f"try {{ $s.SelectVoice({_ps_quote(self.voice)}) }} catch {{}}; "
             script = (
                 "Add-Type -AssemblyName System.Speech; "
                 "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-                f"$s.SetOutputToWaveFile('{path}'); "
-                f"$s.Speak({_ps_quote(text)}); $s.Dispose()"
+                + select
+                + f"$s.SetOutputToWaveFile('{path}'); "
+                + f"$s.Speak({_ps_quote(text)}); $s.Dispose()"
             )
             return ["powershell", "-NoProfile", "-Command", script]
         return []

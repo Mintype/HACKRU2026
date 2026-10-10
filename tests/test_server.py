@@ -121,6 +121,13 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(settings.get("audio_route"), "bluetooth")
         self.assertEqual(settings.get("model"), "lite")
 
+    def test_tts_mode_is_validated(self):
+        settings = Settings(path=self.path)
+        settings.update({"tts_mode": "local"})
+        self.assertEqual(settings.get("tts_mode"), "local")
+        settings.update({"tts_mode": "nonsense"})
+        self.assertEqual(settings.get("tts_mode"), "auto")
+
     def test_apply_to_machine_config(self):
         settings = Settings(path=self.path)
         settings.update({"warn_seconds": 4, "roast_seconds": 9, "lower_threshold": 0.6})
@@ -157,6 +164,20 @@ class TestRoastPool(unittest.TestCase):
         pool.refill_once()
         self.assertIsNotNone(pool.take_any())
         self.assertEqual(pool.ready, 3)
+
+    def test_pool_reports_voice_mix_and_can_be_cleared(self):
+        pool = RoastPool(
+            text_source=lambda tier, count: [{"text": f"{tier} {i}", "tier": tier} for i in range(count)],
+            synthesize=lambda text: f"/tmp/{text}.wav",
+            voice_of=lambda path: "gemini",
+            size=2,
+            tiers=("mild",),
+            log_fn=lambda *_: None,
+        )
+        pool.refill_once()
+        self.assertEqual(pool.voice_counts(), {"gemini": 2})
+        self.assertEqual(pool.clear(), 2)
+        self.assertEqual(pool.voice_counts(), {})
 
 
 if __name__ == "__main__":

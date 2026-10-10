@@ -1,4 +1,5 @@
 import json
+import pathlib
 import tempfile
 import unittest
 import wave
@@ -6,6 +7,8 @@ from pathlib import Path
 
 from voice import roasts, wavutil
 from voice.gemini_text import build_prompt, load_prompt_template, parse_roasts, validate
+
+import config
 
 
 class TestRoasts(unittest.TestCase):
@@ -214,6 +217,114 @@ class TestGeminiTTSQuotaBackoff(unittest.TestCase):
             self.assertGreater(tts.backoff_remaining, 0)
             self.assertFalse(tts.synthesize("Sit up again.", out))
             self.assertEqual(calls["n"], 1)
+
+
+class TestVoiceMode(unittest.TestCase):
+    """A pool must be able to use a single voice, on purpose."""
+
+    class _Settings:
+        def __init__(self, mode):
+            self._mode = mode
+
+        def get(self, key, default=None):
+            if key == "tts_mode":
+                return self._mode
+            if key == "nice_mode":
+                return False
+            return default
+
+    class _Player:
+        route = "off"
+
+        def play_clip(self, clip):
+            return True
+
+    class _TTS:
+        available = True
+        last_error = None
+
+        def __init__(self, ready=True):
+            self.ready = ready
+
+        def synthesize(self, text, path):
+            pathlib.Path(path).write_bytes(b"RIFF....")
+            return True
+
+    class _Local:
+        available = True
+        engine = "fake"
+
+        def synthesize(self, text, path):
+            pathlib.Path(path).write_bytes(b"RIFF....")
+            return True
+
+    def _service(self, mode, gemini_ready=True):
+        from voice.service import RoastService
+
+        return RoastService(
+            player=self._Player(),
+            tts=self._TTS(gemini_ready),
+            local_tts=self._Local(),
+            settings=self._Settings(mode),
+            context_provider=lambda: {},
+            pool_size=2,
+        )
+
+    def _voice(self, mode, gemini_ready=True):
+        with tempfile.TemporaryDirectory() as tmp:
+            original = config.ROAST_DIR
+            config.ROAST_DIR = pathlib.Path(tmp)
+            try:
+                return self._service(mode, gemini_ready)._synthesize("Sit up.")
+            finally:
+                config.ROAST_DIR = original
+
+    def test_local_mode_uses_only_the_local_engine(self):
+        self.assertTrue(self._voice("local").endswith("_local.wav"))
+
+    def test_gemini_mode_uses_gemini_when_ready(self):
+        self.assertTrue(self._voice("gemini").endswith("_gemini.wav"))
+
+    def test_gemini_mode_stays_silent_rather_than_mixing(self):
+        self.assertIsNone(self._voice("gemini", gemini_ready=False))
+
+    def test_auto_falls_back_to_local(self):
+        self.assertTrue(self._voice("auto", gemini_ready=False).endswith("_local.wav"))
+
+    def test_voice_is_recovered_from_the_filename(self):
+        from voice.service import RoastService
+
+        self.assertEqual(RoastService._voice_from_path("/x/roast_ab_gemini.wav"), "gemini")
+        self.assertEqual(RoastService._voice_from_path("/x/roast_ab_local.wav"), "local")
+        self.assertEqual(RoastService._voice_from_path("/x/roast_ab.wav"), "unknown")
+        self.assertIsNone(RoastService._voice_from_path(None))
+
+
+class TestLocalVoiceSelection(unittest.TestCase):
+    def test_local_tts_voice_can_be_chosen(self):
+        import pathlib
+
+        from voice.tts_local import LocalTTS
+
+        tts = LocalTTS(voice="Microsoft Zira Desktop")
+        tts.engine = "sapi"
+        script = " ".join(tts._command("Sit up.", pathlib.Path("/tmp/x.wav")))
+        self.assertIn("SelectVoice", script)
+        self.assertIn("Microsoft Zira Desktop", script)
+
+        tts.engine = "espeak-ng"
+        command = tts._command("Sit up.", pathlib.Path("/tmp/x.wav"))
+        self.assertIn("Microsoft Zira Desktop", command)
+
+    def test_default_espeak_voice_does_not_select_on_windows(self):
+        import pathlib
+
+        from voice.tts_local import LocalTTS
+
+        tts = LocalTTS(voice="en")
+        tts.engine = "sapi"
+        script = " ".join(tts._command("Sit up.", pathlib.Path("/tmp/x.wav")))
+        self.assertNotIn("SelectVoice", script)
 
 
 if __name__ == "__main__":

@@ -635,6 +635,14 @@
       voice.gemini_tts && ttsReady ? "ok" : "warn"
     );
     setState($("sys-local"), voice.local_tts || "none", voice.local_tts ? "ok" : "none");
+
+    // A pool voiced by more than one engine sounds inconsistent, so say so.
+    const voices = (voice.pool && voice.pool.voices) || {};
+    const kinds = Object.keys(voices).filter((k) => voices[k] > 0 && k !== "none");
+    const mix = kinds.map((k) => `${k} ${voices[k]}`).join(" / ");
+    const voiceCell = $("sys-voice");
+    voiceCell.textContent = (voice.tts_mode || "auto") + (mix ? ` \u00b7 ${mix}` : "");
+    voiceCell.className = kinds.length > 1 ? "warn" : "";
     $("sys-pool").textContent = `${pool.ready ?? 0}/${pool.target ?? 0}`;
   }
 
@@ -728,6 +736,7 @@
       if (input && settings[key] !== undefined) input.value = settings[key];
     });
     if (settings.audio_route) $("settings-form").elements["audio_route"].value = settings.audio_route;
+    if (settings.tts_mode) $("settings-form").elements["tts_mode"].value = settings.tts_mode;
     if (settings.nice_mode !== undefined) $("nice-mode").checked = !!settings.nice_mode;
     if (settings.mirror !== undefined) {
       mirrorOn = !!settings.mirror;
@@ -796,6 +805,7 @@
         cooldown_seconds: Number(form.elements["cooldown_seconds"].value),
         delta_angle: Number(form.elements["delta_angle"].value),
         audio_route: form.elements["audio_route"].value,
+        tts_mode: form.elements["tts_mode"].value,
         nice_mode: $("nice-mode").checked,
       };
       try {
