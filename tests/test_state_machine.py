@@ -223,6 +223,41 @@ class TestStateMachine(unittest.TestCase):
         events = feed(self.machine, start, 30, 0.2)
         self.assertNotIn("roast_due", event_names(events))
 
+    def test_time_to_roast_counts_down(self):
+        start = with_session(self.machine)
+        self.assertIsNone(self.machine.time_to_roast(start)["seconds"])
+
+        feed(self.machine, start, 4, 0.55)  # moderate: only the sustained trigger
+        info = self.machine.time_to_roast(start + 3)
+        self.assertEqual(info["trigger"], "sustained_slouch")
+        self.assertAlmostEqual(info["seconds"], 7.0, delta=0.6)
+        self.assertFalse(info["ready"])
+        self.assertIsNone(info["blocked_by"])
+
+    def test_time_to_roast_prefers_the_faster_trigger(self):
+        self.machine.config.roast_seconds = 600.0
+        start = with_session(self.machine)
+        feed(self.machine, start, 2, 0.2)
+        info = self.machine.time_to_roast(start + 1)
+        self.assertEqual(info["trigger"], "bad_posture")
+        self.assertAlmostEqual(info["seconds"], 2.0, delta=0.6)
+
+    def test_time_to_roast_reports_a_cooldown_hold(self):
+        self.machine.config.cooldown_seconds = 90.0
+        start = with_session(self.machine)
+        feed(self.machine, start, 4, 0.2)
+        self.assertEqual(self.machine.state, ROASTED)
+        info = self.machine.time_to_roast(start + 3)
+        self.assertEqual(info["blocked_by"], "cooldown")
+        self.assertGreater(info["seconds"], 80.0)
+
+    def test_snapshot_carries_the_countdown(self):
+        start = with_session(self.machine)
+        feed(self.machine, start, 4, 0.55)
+        snap = self.machine.snapshot(start + 3)
+        self.assertIn("next_roast", snap)
+        self.assertAlmostEqual(snap["next_roast"]["seconds"], 7.0, delta=0.6)
+
     def test_snapshot_fields(self):
         start = with_session(self.machine)
         feed(self.machine, start, 15, 0.5)

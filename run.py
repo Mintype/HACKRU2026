@@ -23,6 +23,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -111,6 +112,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         help="print roasts instead of playing them (laptop / testing)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="bind address (default 0.0.0.0)")
     parser.add_argument("--port", type=int, default=5000, help="port (default 5000)")
+    parser.add_argument("--timers", nargs="?", const="http://127.0.0.1:5000", default=None, metavar="URL",
+                        help="watch the roast countdown from a running server (Ctrl+C to stop)")
     parser.add_argument("--settings", type=str, default=None, help="path to a settings JSON file")
     parser.add_argument("--debug", action="store_true", help="verbose logging")
     return parser.parse_args(argv)
@@ -240,6 +243,58 @@ def _play(path) -> None:
         print(f"  played       : no audio player found - open it yourself: {path}")
 
 
+def timers_command(url: str) -> int:
+    """Live countdown to the next roast, polled from a running server.
+
+    Shows the state, the score, how long the current slouch has lasted, and how
+    long until a roast fires — plus what is holding it back, which is the part
+    that is otherwise invisible.
+    """
+    import json
+    import urllib.request
+
+    base = url.rstrip("/")
+    print(f"  watching {base}/api/stats   (Ctrl+C to stop)")
+    print("  " + "-" * 78)
+    try:
+        while True:
+            try:
+                with urllib.request.urlopen(f"{base}/api/stats", timeout=3) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+            except Exception as exc:  # noqa: BLE001 - a debug tool should not crash
+                print(f"\r  cannot reach {base}: {str(exc)[:56]:<56}", end="", flush=True)
+                time.sleep(1.0)
+                continue
+
+            live = data.get("live") or {}
+            reading = data.get("reading") or {}
+            next_roast = live.get("next_roast") or {}
+            score = reading.get("score")
+            score_text = f"{score:.2f}" if isinstance(score, (int, float)) else " -- "
+            part = str(reading.get("slouch_part") or "-")
+            slouched = float(live.get("slouch_seconds") or 0.0)
+
+            if next_roast.get("seconds") is None:
+                countdown = "not slouching"
+            else:
+                countdown = f"roast in {next_roast['seconds']:5.1f}s"
+                if next_roast.get("blocked_by"):
+                    countdown += f"  (held by {next_roast['blocked_by']})"
+                else:
+                    countdown += f"  ({next_roast.get('trigger')})"
+
+            print(
+                f"\r  {str(data.get('state') or '?'):<12} score {score_text}  part {part:<6}"
+                f"  slouched {slouched:5.1f}s   {countdown:<46}",
+                end="",
+                flush=True,
+            )
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print()
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     config.load_env()
@@ -258,6 +313,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.test_voice is not None:
         return test_voice_command(args.test_voice)
+
+    if args.timers is not None:
+        return timers_command(args.timers)
 
     app = create_app(
         simulate=args.simulate,

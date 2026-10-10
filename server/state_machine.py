@@ -182,6 +182,38 @@ class PostureStateMachine:
         self._calibration_requested = True
         return True
 
+    def time_to_roast(self, now: Optional[float] = None) -> Dict:
+        """How long until the next roast, and what will cause it.
+
+        A debugging aid: the website and ``run.py --timers`` show this ticking
+        down, so you can see which trigger is about to fire and whether the
+        cooldown is holding it back.
+        """
+        now = float(now if now is not None else time.time())
+        empty = {"seconds": None, "trigger": None, "blocked_by": None, "ready": False}
+        if self.slouch_since is None:
+            return empty
+
+        elapsed = now - self.slouch_since
+        waits: List[tuple] = []
+        if not self.roasted:
+            waits.append(("sustained_slouch", max(0.0, self.config.roast_seconds - elapsed)))
+        if self.config.bad_score_threshold > 0 and self.bad_since is not None:
+            waits.append(
+                ("bad_posture", max(0.0, self.config.bad_score_seconds - (now - self.bad_since)))
+            )
+        if not waits:
+            return empty
+
+        trigger, wait = min(waits, key=lambda item: item[1])
+        cooldown = max(0.0, self.cooldown_until - now)
+        return {
+            "seconds": round(max(wait, cooldown), 1),
+            "trigger": trigger,
+            "blocked_by": "cooldown" if cooldown > wait else None,
+            "ready": max(wait, cooldown) <= 0.0,
+        }
+
     def snapshot(self, now: Optional[float] = None) -> Dict:
         now = float(now if now is not None else time.time())
         return {
@@ -197,6 +229,7 @@ class PostureStateMachine:
             "slouch_seconds": round(max(0.0, now - self.slouch_since), 1) if self.slouch_since else 0.0,
             "bad_seconds": round(max(0.0, now - self.bad_since), 1) if self.bad_since else 0.0,
             "cooldown_remaining": round(max(0.0, self.cooldown_until - now), 1),
+            "next_roast": self.time_to_roast(now),
             "calibrating": self.state == CALIBRATING,
             "calibration_progress": (
                 round(min(1.0, (now - self._calib_started) / max(self.config.calibration_seconds, 1e-6)), 3)

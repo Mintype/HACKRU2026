@@ -551,6 +551,7 @@
       $("sys-fps").textContent = text;
     }
     if (reading.state) applyState(reading.state);
+    if (reading.next_roast) updateTimer(reading.next_roast);
 
     // Why a roast may never fire: nobody detected, or detected but not seated.
     if (reading.person !== undefined) {
@@ -565,6 +566,21 @@
       if (series.length > 4000) series.shift();
       requestChart();
     }
+  }
+
+  function updateTimer(next) {
+    // "roast in 6.4s · bad_posture" — the countdown, so the timer is debuggable.
+    const el = $("roast-timer");
+    if (!el || !next) return;
+    if (next.seconds === null || next.seconds === undefined) {
+      el.textContent = "no slouch";
+      el.className = "mono muted";
+      return;
+    }
+    const seconds = Math.max(0, next.seconds);
+    el.textContent =
+      `roast in ${seconds.toFixed(1)}s  \u00b7  ` + (next.blocked_by || next.trigger || "?");
+    el.className = "mono" + (seconds <= 3 ? " warn" : "");
   }
 
   function showCaption(text) {
@@ -589,9 +605,7 @@
       $("stat-streak").textContent = Math.round(stats.longest_good_streak || 0) + "s";
     }
 
-    const cooldown = live.cooldown_remaining || 0;
-    $("cooldown-row").classList.toggle("hidden", cooldown <= 0);
-    if (cooldown > 0) $("cooldown").textContent = Math.ceil(cooldown);
+    if (live.next_roast) updateTimer(live.next_roast);
     $("calib-bar").style.width = Math.round((live.calibration_progress || 0) * 100) + "%";
   }
 

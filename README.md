@@ -427,6 +427,7 @@ offender does not sound like a first slip.
 | `--list-cameras` | Probe camera indices, print what works, and exit. |
 | `--list-snapshots` | With the above: save one still per camera to `data/camera-scan/` so you can tell them apart. |
 | `--test-voice [TEXT]` | Voice one line with the configured provider, report which engine spoke, play it, exit. |
+| `--timers [URL]` | Live countdown to the next roast, polled from a running server (default `http://127.0.0.1:5000`). Shows the state, score, how long the slouch has lasted, which trigger is next and whether a cooldown is holding it. This is the tool for "why has it not roasted yet". |
 | `--model NAME` | MediaPipe model: `lite` (default), `full`, `heavy`. |
 | `--no-audio` | Print roasts instead of playing them. |
 | `--host` / `--port` | Bind address and port. |
@@ -439,8 +440,8 @@ offender does not sound like a first slip.
 | ------ | ----- | ------- |
 | GET | `/` | The website. |
 | GET | `/video_feed` | Live annotated MJPEG stream. |
-| GET | `/events` | Server-sent events. Message kinds: `reading` (~2/s), `event` (state changes, roast_due), `roast` (a clip was chosen), `settings`, `calibrating`. |
-| GET | `/api/stats` | Current session stats plus the live state, reading and settings. |
+| GET | `/events` | Server-sent events. Message kinds: `reading` (~2/s, includes `next_roast` for the countdown), `event` (state changes, roast_due), `roast` (a clip was chosen), `settings`, `calibrating`. |
+| GET | `/api/stats` | Current session stats plus the live state, reading, settings and `next_roast` (the countdown: seconds, which trigger, and whether a cooldown is holding it). |
 | GET | `/api/history` | Readings for the chart, plus roast markers. |
 | GET | `/api/roasts?limit=N` | The quote ledger (default 3, max 50). |
 | GET | `/api/status` | Camera, fps, audio route, voice engines, pool and detector state. |
@@ -476,7 +477,7 @@ it as translucent panels. Data arrives over SSE, so nothing needs refreshing.
 
 | Panel | Shows |
 | ----- | ----- |
-| **Posture** | live neck and torso angles, the score with its 0.7/0.8 threshold ticks, cooldown. |
+| **Posture** | live neck and torso angles, the score with its 0.7/0.8 threshold ticks, and the **roast countdown** — `roast in 6.4s · sustained_slouch`, or `held by cooldown` when a cooldown is delaying it. |
 | **Session** | good-posture %, slouches, roasts, longest good streak. |
 | **Score** | the score over the session, with roast markers (resizable). |
 | **Controls** | calibrate, test roast, nice mode, and every setting in the tables above. |

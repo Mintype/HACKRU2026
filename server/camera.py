@@ -264,6 +264,8 @@ class VisionService(threading.Thread):
                 "state": reading.get("state"),
                 "fps": self.fps,
                 "calibrated": reading.get("calibrated"),
+                # lets the website show the roast countdown ticking
+                "next_roast": self.state_machine.time_to_roast(),
             }
         )
 
