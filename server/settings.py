@@ -23,6 +23,7 @@ DEFAULTS: Dict[str, Any] = {
     "upper_threshold": 0.8,
     "bad_score_threshold": 0.45,
     "bad_score_seconds": 3.0,
+    "phone_threshold_seconds": 10.0,
     # vision
     "delta_angle": 20.0,
     "camera_index": 0,
@@ -50,6 +51,7 @@ BOUNDS: Dict[str, tuple] = {
     "upper_threshold": (0.05, 1.0),
     "bad_score_threshold": (0.0, 1.0),
     "bad_score_seconds": (0.0, 60.0),
+    "phone_threshold_seconds": (0.0, 600.0),
     "live_api_cooldown_seconds": (0.0, 3600.0),
     "delta_angle": (1.0, 60.0),
     "camera_index": (0, 16),
@@ -180,6 +182,7 @@ class Settings:
             "upper_threshold",
             "bad_score_threshold",
             "bad_score_seconds",
+            "phone_threshold_seconds",
         )
         with self._lock:
             for key in mapping:

@@ -10,10 +10,11 @@ Usage
     python roast_timeline.py --profile bad --bad-score 0        # disable the score trigger
 
 Profiles
-    scripted  the --simulate sequence: away -> good -> slouch -> good -> ...
+    scripted  the --simulate sequence: away -> good -> slouch -> phone -> good ...
     bad       seated and slouching hard from t=0 (trips the deep-slouch trigger)
     moderate  slouching but not deeply (score 0.55), which exercises the
               sustained timer instead of the deep-slouch trigger
+    phone     sitting up well, but staring down at a phone
     good      seated and sitting well the whole time (should never roast)
 """
 
@@ -53,13 +54,16 @@ def profile_readings(name: str, seconds: float, fps: float) -> Iterator[dict]:
     ts = 0.0
     while ts < seconds:
         if name == "bad":
-            neck, torso, score, part = 46.0, 6.0, 0.2, "neck"
+            neck, torso, score, part, phone = 46.0, 6.0, 0.2, "neck", False
         elif name == "moderate":
             # below the slouch threshold but above the deep-slouch trigger, so
             # only the sustained timer can fire
-            neck, torso, score, part = 20.0, 6.0, 0.55, "neck"
+            neck, torso, score, part, phone = 20.0, 6.0, 0.55, "neck", False
+        elif name == "phone":
+            # sitting up perfectly well, but staring into a phone
+            neck, torso, score, part, phone = 12.0, 4.0, 0.97, "even", True
         else:
-            neck, torso, score, part = 12.0, 4.0, 0.97, "even"
+            neck, torso, score, part, phone = 12.0, 4.0, 0.97, "even", False
         yield {
             "ts": ts,
             "person": True,
@@ -70,6 +74,10 @@ def profile_readings(name: str, seconds: float, fps: float) -> Iterator[dict]:
             "neck_drift": max(0.0, neck - 12.0),
             "torso_drift": max(0.0, torso - 4.0),
             "slouch_part": part,
+            "head_down_deg": 52.0 if phone else 6.0,
+            "hands_up": phone,
+            "phone": phone,
+            "phone_seconds": round(ts, 1) if phone else 0.0,
         }
         ts += step
 
@@ -78,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--profile", choices=("scripted", "bad", "moderate", "good"), default="scripted")
+    parser.add_argument("--profile", choices=("scripted", "bad", "moderate", "phone", "good"), default="scripted")
     parser.add_argument("--fps", type=float, default=10.0)
     parser.add_argument("--seconds", type=float, default=180.0, help="only used by bad/good")
     parser.add_argument("--roast", type=float, help="override roast_seconds")

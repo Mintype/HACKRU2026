@@ -125,6 +125,15 @@ class TestPromptAndValidation(unittest.TestCase):
         self.assertGreaterEqual(len(roasts.SPICY), 15)
         self.assertGreaterEqual(len(roasts.NICE), 10)
 
+    def test_fallback_batch_can_aim_at_the_phone(self):
+        batch = roasts.fallback_batch(count=4, tier="mild", fault="phone")
+        self.assertTrue(any(item["text"] in roasts.PHONE for item in batch))
+        self.assertGreaterEqual(len(roasts.PHONE), 8)
+
+    def test_prompt_mentions_the_phone(self):
+        prompt = build_prompt(count=3, tier="mild", context={"phone": True})
+        self.assertIn("staring down at a phone", prompt)
+
     def test_prompt_carries_a_writing_angle(self):
         from voice.roasts import TOPICS
 

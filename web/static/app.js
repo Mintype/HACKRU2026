@@ -31,15 +31,17 @@
     good: "state-good",
     slouching: "state-slouching",
     roasted: "state-roasted",
+    phone: "state-phone",
   };
-  // Red means bad posture, whether or not a roast has landed yet: slouching and
-  // roasted are the same badness, only the pill text distinguishes them.
+  // Red means bad posture, whether or not a roast has landed yet: slouching,
+  // roasted and phone are the same badness, only the pill text distinguishes them.
   const STATE_COLOR = {
     away: "#8b93a1",
     calibrating: "#86a9d4",
     good: "#82c08e",
     slouching: "#d98080",
     roasted: "#d98080",
+    phone: "#d98080",
   };
 
   const display = { dim: 35 };
@@ -649,6 +651,16 @@
       setField("dbg-torso", `${num(reading.torso_angle, 1)}\u00b0   +${num(reading.torso_drift, 1)}\u00b0`);
     }
     if (reading.slouch_part !== undefined) setField("dbg-part", reading.slouch_part || "\u2014");
+    if (reading.phone !== undefined) {
+      setField(
+        "dbg-phone",
+        reading.phone ? `yes  ${num(reading.phone_seconds, 1)}s` : "no",
+        reading.phone ? "warn" : "none"
+      );
+    }
+    if (reading.head_down_deg !== undefined) {
+      setField("dbg-head", `${num(reading.head_down_deg, 0)}\u00b0`);
+    }
     if (reading.slouch_seconds !== undefined) setField("dbg-slouch", `${num(reading.slouch_seconds, 1)}s`);
     if (reading.cooldown_remaining !== undefined) {
       setField("dbg-cooldown", `${num(reading.cooldown_remaining, 1)}s`);
@@ -680,7 +692,7 @@
       );
       setField(
         "dbg-timers",
-        `roast ${num(settings.roast_seconds, 0)}s  cool ${num(settings.cooldown_seconds, 0)}s  bad<${num(settings.bad_score_threshold, 2)} ${num(settings.bad_score_seconds, 0)}s`
+        `roast ${num(settings.roast_seconds, 0)}s  cool ${num(settings.cooldown_seconds, 0)}s  bad<${num(settings.bad_score_threshold, 2)} ${num(settings.bad_score_seconds, 0)}s  phone ${num(settings.phone_threshold_seconds, 0)}s`
       );
       setField(
         "dbg-session",
@@ -850,7 +862,7 @@
 
   function fillSettings(settings) {
     if (!settings) return;
-    ["roast_seconds", "cooldown_seconds", "delta_angle", "bad_score_threshold", "live_api_cooldown_seconds"].forEach((key) => {
+    ["roast_seconds", "cooldown_seconds", "delta_angle", "bad_score_threshold", "phone_threshold_seconds", "live_api_cooldown_seconds"].forEach((key) => {
       const input = $("settings-form").elements[key];
       if (input && settings[key] !== undefined) input.value = settings[key];
     });
@@ -923,6 +935,7 @@
         cooldown_seconds: Number(form.elements["cooldown_seconds"].value),
         delta_angle: Number(form.elements["delta_angle"].value),
         bad_score_threshold: Number(form.elements["bad_score_threshold"].value),
+        phone_threshold_seconds: Number(form.elements["phone_threshold_seconds"].value),
         live_api_cooldown_seconds: Number(form.elements["live_api_cooldown_seconds"].value),
         roast_source: form.elements["roast_source"].value,
         audio_route: form.elements["audio_route"].value,

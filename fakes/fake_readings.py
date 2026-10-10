@@ -26,9 +26,9 @@ BASELINE_TORSO = 4.0
 DEFAULT_SCRIPT: Sequence[Tuple[str, float]] = (
     ("away", 3.0),
     ("good", 9.0),
+    ("phone", 22.0),
+    ("good", 10.0),
     ("slouch", 36.0),
-    ("good", 16.0),
-    ("slouch", 40.0),
     ("good", 10.0),
     ("slouch", 20.0),
     ("good", 8.0),
@@ -73,17 +73,22 @@ def scripted_readings(
                         "neck_drift": None,
                         "torso_drift": None,
                         "slouch_part": None,
+                        "head_down_deg": None,
+                        "hands_up": False,
+                        "phone": False,
+                        "phone_seconds": 0.0,
                         "sim": True,
                         "phase": phase,
                     }
                 else:
-                    if phase == "good":
-                        drift = 0.0
-                        seated = True
-                    else:
-                        # Slouch deepens over the phase, then plateaus.
+                    # "phone" is the interesting one: sitting up fine, but staring
+                    # into a phone, so the score is good and the phone fault fires.
+                    if phase == "slouch":
                         drift = _ramp(elapsed, min(duration * 0.45, 14.0))
-                        seated = True
+                    else:
+                        drift = 0.0
+                    seated = True
+                    phone = phase == "phone"
 
                     neck = BASELINE_NECK + drift * 30.0 + rng.uniform(-1.2, 1.2)
                     torso = BASELINE_TORSO + drift * 14.0 + rng.uniform(-0.8, 0.8)
@@ -111,6 +116,10 @@ def scripted_readings(
                         "neck_drift": round(max(0.0, neck_drift), 2),
                         "torso_drift": round(max(0.0, torso_drift), 2),
                         "slouch_part": part,
+                        "head_down_deg": round(52.0 + rng.uniform(-3.0, 3.0), 1) if phone else round(rng.uniform(2.0, 9.0), 1),
+                        "hands_up": phone,
+                        "phone": phone,
+                        "phone_seconds": round(elapsed, 1) if phone else 0.0,
                         "sim": True,
                         "phase": phase,
                     }

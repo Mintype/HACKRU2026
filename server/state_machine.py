@@ -31,8 +31,9 @@ CALIBRATING = "calibrating"
 GOOD = "good"
 SLOUCHING = "slouching"
 ROASTED = "roasted"
+PHONE = "phone"
 
-STATES = (AWAY, CALIBRATING, GOOD, SLOUCHING, ROASTED)
+STATES = (AWAY, CALIBRATING, GOOD, SLOUCHING, ROASTED, PHONE)
 
 
 @dataclass
@@ -50,6 +51,9 @@ class StateMachineConfig:
     bad_score_threshold: float = 0.45
     #: The bad score must hold this long, so one noisy frame cannot fire an API call.
     bad_score_seconds: float = 3.0
+    #: How long they may stare down at a phone/device before being roasted. 0
+    #: disables the phone trigger.
+    phone_threshold_seconds: float = 10.0
 
 
 class PostureStateMachine:
@@ -62,6 +66,7 @@ class PostureStateMachine:
         self.slouch_since: Optional[float] = None
         self.good_since: Optional[float] = None
         self.bad_since: Optional[float] = None
+        self.phone_since: Optional[float] = None
         self.hysteresis_slouch = False
         self.roasted = False
 
@@ -100,6 +105,7 @@ class PostureStateMachine:
             if self.state != AWAY:
                 events.append(self._end_session(ts, reason="left"))
             self._reset_episode()
+            self.phone_since = None
             self._transition(ts, AWAY, events)
             return events
 
@@ -113,6 +119,7 @@ class PostureStateMachine:
             self.slouch_part = "even"
             self._part_votes = {"neck": 0, "torso": 0, "even": 0}
             self.bad_since = None
+            self.phone_since = None
             self.cooldown_until = 0.0
             events.append(
                 {
@@ -171,8 +178,11 @@ class PostureStateMachine:
 
         if self.hysteresis_slouch:
             events.extend(self._slouching(ts, reading))
-        else:
+        elif not reading.get("phone"):
+            # While the phone is out, do not recover to good: the fault is still
+            # happening even though the posture score looks fine.
             events.extend(self._recovering(ts))
+        events.extend(self._phone(ts, reading, score))
         return events
 
     def request_calibration(self) -> bool:
@@ -191,16 +201,18 @@ class PostureStateMachine:
         """
         now = float(now if now is not None else time.time())
         empty = {"seconds": None, "trigger": None, "blocked_by": None, "ready": False}
-        if self.slouch_since is None:
-            return empty
 
-        elapsed = now - self.slouch_since
-        waits: List[tuple] = [
-            ("sustained_slouch", max(0.0, self.config.roast_seconds - elapsed))
-        ]
-        if self.config.bad_score_threshold > 0 and self.bad_since is not None:
+        waits: List[tuple] = []
+        if self.slouch_since is not None:
+            elapsed = now - self.slouch_since
+            waits.append(("sustained_slouch", max(0.0, self.config.roast_seconds - elapsed)))
+            if self.config.bad_score_threshold > 0 and self.bad_since is not None:
+                waits.append(
+                    ("bad_posture", max(0.0, self.config.bad_score_seconds - (now - self.bad_since)))
+                )
+        if self.config.phone_threshold_seconds > 0 and self.phone_since is not None:
             waits.append(
-                ("bad_posture", max(0.0, self.config.bad_score_seconds - (now - self.bad_since)))
+                ("phone", max(0.0, self.config.phone_threshold_seconds - (now - self.phone_since)))
             )
         if not waits:
             return empty
@@ -226,6 +238,8 @@ class PostureStateMachine:
             "worst_neck_angle": round(self.worst_neck_angle, 1),
             "worst_torso_angle": round(self.worst_torso_angle, 1),
             "slouch_part": self.slouch_part,
+            "phone": bool((self.last_reading or {}).get("phone")),
+            "phone_seconds": round(now - self.phone_since, 1) if self.phone_since is not None else 0.0,
             "slouch_seconds": round(max(0.0, now - self.slouch_since), 1) if self.slouch_since else 0.0,
             "bad_seconds": round(max(0.0, now - self.bad_since), 1) if self.bad_since else 0.0,
             "cooldown_remaining": round(max(0.0, self.cooldown_until - now), 1),
@@ -296,13 +310,36 @@ class PostureStateMachine:
             events.extend(self._fire_roast(ts, elapsed, score, "bad_posture"))
         return events
 
+    def _phone(self, ts: float, reading: Dict, score: Optional[float]) -> List[Dict]:
+        """Roast sustained head-down, which is its own fault.
+
+        It deliberately runs outside the slouch machine: someone can sit up
+        perfectly straight and still stare into their lap, and that deserves an
+        insult too. The cooldown is the only thing spacing those out.
+        """
+        events: List[Dict] = []
+        if self.config.phone_threshold_seconds <= 0 or not reading.get("phone"):
+            self.phone_since = None
+            return events
+        if self.phone_since is None:
+            self.phone_since = ts
+            # Show it: a red "phone" pill beats a green one with a hidden fault.
+            if self.state == GOOD:
+                self._transition(ts, PHONE, events)
+        elapsed = ts - self.phone_since
+        if elapsed >= self.config.phone_threshold_seconds and ts >= self.cooldown_until:
+            events.extend(self._fire_roast(ts, elapsed, score or 0.0, "phone"))
+        return events
+
     def _fire_roast(self, ts: float, elapsed: float, score: float, reason: str) -> List[Dict]:
         """Emit ``roast_due`` and start the cooldown that rate-limits the next one."""
         self.roasted = True
         self.roasts_due += 1
         self.cooldown_until = ts + self.config.cooldown_seconds
         events: List[Dict] = []
-        self._transition(ts, ROASTED, events)
+        # A phone roast keeps the `phone` state; the posture triggers show ROASTED.
+        if reason != "phone":
+            self._transition(ts, ROASTED, events)
         events.append(
             {
                 "event": "roast_due",
@@ -313,6 +350,7 @@ class PostureStateMachine:
                 "worst_neck_angle": round(self.worst_neck_angle, 1),
                 "worst_torso_angle": round(self.worst_torso_angle, 1),
                 "slouch_part": self.slouch_part,
+                "phone": reason == "phone",
                 "slouch_seconds": round(elapsed, 1),
                 "score": round(score, 3),
                 "state": ROASTED,
@@ -325,7 +363,7 @@ class PostureStateMachine:
         if self.good_since is None:
             self.good_since = ts
         # Debounce the return to good so a brief sit-up cannot dodge the roast.
-        if self.state in (SLOUCHING, ROASTED) and (ts - self.good_since) >= self.config.good_debounce_seconds:
+        if self.state in (SLOUCHING, ROASTED, PHONE) and (ts - self.good_since) >= self.config.good_debounce_seconds:
             self._reset_episode()
             self._transition(ts, GOOD, events)
             events.append(

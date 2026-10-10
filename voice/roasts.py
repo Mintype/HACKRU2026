@@ -109,6 +109,20 @@ TORSO = [
     "Your back wants a better chair, not a rescue.",
 ]
 
+#: Phone use is its own fault: these are picked when the head is down.
+PHONE = [
+    "Put the phone down. It is not that interesting.",
+    "Your phone has seen enough of your face for one day.",
+    "Look up. Whatever that is can wait ten seconds.",
+    "That is a phone, not a posture aid.",
+    "Your neck is paying for whatever you are reading.",
+    "Sit up and look at the room, not your lap.",
+    "The phone won this round. Your spine lost.",
+    "Heads up. Literally.",
+    "You are folded over a rectangle again.",
+    "Your screen is not going anywhere. Neither are you, apparently.",
+]
+
 NICE = [
     "Sit tall. That is the good stuff.",
     "Spine aligned, mind sharp. Carry on.",
@@ -144,10 +158,12 @@ TOPICS = (
     "Write as a building inspector condemning a structure.",
     "Write as a playwright describing a tragedy in one line.",
     "Write as the camera, which has seen all of this before.",
+    "Write about the phone or screen they are staring at.",
 )
 
 POOLS: Dict[str, List[str]] = {"mild": MILD, "medium": MEDIUM, "spicy": SPICY, "nice": NICE}
 PART_LINES: Dict[str, List[str]] = {"neck": NECK, "torso": TORSO}
+FAULT_LINES: Dict[str, List[str]] = {"phone": PHONE}
 TIERS = ("mild", "medium", "spicy")
 
 
@@ -180,12 +196,14 @@ def fallback_batch(
     nice: bool = False,
     exclude: Iterable[str] = (),
     part: str | None = None,
+    fault: str | None = None,
     rng: random.Random | None = None,
 ) -> List[Dict[str, str]]:
     """Return up to ``count`` fallback lines, avoiding recent ones.
 
     ``part`` ("neck"/"torso") aims part of the batch at whatever is actually
-    giving way, so even the offline lines sound like they know what is wrong.
+    giving way, and ``fault`` ("phone") overrides it when the problem is not the
+    posture at all.
     """
     rng = rng or random
     count = max(0, int(count))
@@ -196,10 +214,13 @@ def fallback_batch(
         return keep or list(lines)
 
     chosen: List[str] = []
-    if not nice and part in PART_LINES:
-        part_lines = fresh(PART_LINES[part])
-        rng.shuffle(part_lines)
-        chosen = part_lines[: max(1, count // 2)]
+    aimed_lines = FAULT_LINES.get(fault) if fault else None
+    if aimed_lines is None and part:
+        aimed_lines = PART_LINES.get(part)
+    if not nice and aimed_lines:
+        aimed = fresh(aimed_lines)
+        rng.shuffle(aimed)
+        chosen = aimed[: max(1, count // 2)]
 
     tier_lines = fresh(tier_pool(tier, nice))
     rng.shuffle(tier_lines)
@@ -221,8 +242,9 @@ def fallback_one(
     nice: bool = False,
     exclude: Sequence[str] = (),
     part: str | None = None,
+    fault: str | None = None,
 ) -> str:
-    batch = fallback_batch(count=1, tier=tier, nice=nice, exclude=exclude, part=part)
+    batch = fallback_batch(count=1, tier=tier, nice=nice, exclude=exclude, part=part, fault=fault)
     if batch:
         return batch[0]["text"]
     return "Sit up straight, please."

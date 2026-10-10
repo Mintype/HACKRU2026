@@ -57,6 +57,23 @@ def thigh_angle(hip: Sequence[float], knee: Sequence[float]) -> float:
     return _clamp_angle(math.degrees(math.atan2(dy, dx)))
 
 
+def head_pitch(eye: Sequence[float], ear: Sequence[float]) -> float:
+    """How far the head is tilted *down*, in degrees, signed.
+
+    Measured from the ear→eye line against horizontal: the eye sits forward of
+    the ear, so pitching the head down rotates the eye below it and the angle
+    grows positive. Level is ~0; looking into a lap is tens of degrees.
+
+    This is a heuristic, not object detection: it says "looking down for a long
+    time", which is what a phone, a lap or a keyboard has in common. The raw
+    value is shown on the Debug panel so the threshold can be tuned against a
+    real camera instead of guessed.
+    """
+    dx = abs(float(eye[0]) - float(ear[0]))
+    dy = float(eye[1]) - float(ear[1])  # positive when the eye is below the ear
+    return max(-90.0, min(90.0, math.degrees(math.atan2(dy, dx))))
+
+
 def posture_score(angle: float, baseline: float, tolerance: float = 20.0) -> float:
     """Map an angle to a 0..1 score relative to the calibrated baseline.
 

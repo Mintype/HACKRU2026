@@ -120,6 +120,7 @@ html, body {
 .state-good        { color: var(--good); }
 .state-slouching   { color: var(--bad); }
 .state-roasted     { color: var(--bad); }
+.state-phone       { color: var(--bad); }
 .offline           { color: var(--warn); }
 
 /* --------------------------------------------------------------- buttons */

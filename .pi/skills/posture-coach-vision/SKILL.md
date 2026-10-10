@@ -69,6 +69,35 @@ only a *moderate* slouch (score between `lower_threshold` and
 `bad_score_threshold`) exercises the sustained timer. Set the threshold to 0 to
 disable the score trigger and use only the timer.
 
+## Phone use
+
+A third fault, and deliberately **not** part of the posture score: someone can sit
+up perfectly straight and still stare into their lap.
+
+It is a heuristic, not object detection — `angles.head_pitch()` measures the tilt of
+the ear→eye line against horizontal, and a sustained tilt past
+`phone_pitch_threshold` (~40°) for `phone_delay` (~1.5 s) sets `phone` on the
+reading. That is what a phone, a lap and a keyboard have in common ("looking down
+for a long time"), which is why it is tunable rather than clever: **watch
+`head_down_deg` on the Debug panel while someone looks at a phone and set the
+threshold from what you actually see.**
+
+The state machine runs it outside the slouch machine (`_phone`): on `phone` it
+enters the `phone` state (red), and after `phone_threshold_seconds` (~10 s) fires
+`roast_due` with `reason="phone"`, repeating every `cooldown_seconds` like the other
+triggers. A phone roast does **not** transition to `roasted` — the pill stays on
+`phone` until the head comes up — and recovery to `good` is suppressed while the
+phone is active, so a good posture score cannot mask the fault.
+
+The insults come from `voice/roasts.py:PHONE`, selected by `fault="phone"` in
+`fallback_batch`, and the prompt context gains a line saying this is not a posture
+problem. Test it without a camera:
+
+```bash
+python .pi/skills/posture-coach-vision/scripts/roast_timeline.py --profile phone --seconds 40
+python run.py --simulate                 # the scripted feed has a phone phase
+```
+
 ## Sit-down detection
 
 Thigh angle under `seated_threshold` (~30°) for `seated_delay` (~2 s). When a desk

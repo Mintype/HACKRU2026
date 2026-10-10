@@ -237,6 +237,7 @@ class RoastService:
             nice=nice,
             exclude=exclude,
             part=context.get("slouch_part"),
+            fault="phone" if context.get("phone") else None,
         )
         return self._personalise_text(text)
 
@@ -273,6 +274,7 @@ class RoastService:
                 nice=nice,
                 exclude=exclude + [i["text"] for i in items],
                 part=context.get("slouch_part"),
+                fault="phone" if context.get("phone") else None,
             )
         for item in items[:count]:
             item["text"] = self._personalise_text(item["text"])

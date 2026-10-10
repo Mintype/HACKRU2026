@@ -64,10 +64,14 @@ Originality comes from two more levers:
   token with a random entry from `voice/roasts.py:TOPICS` (write as the chair,
   blame gravity, write as their back's warranty department…), so batches do not
   converge on the same joke. Add angles by adding to `TOPICS`.
-- **Substantial offline pools.** ~20 lines per tier plus 10 neck- and 10
-  torso-specific lines, because the hand-written set is finite: once a tier is
+- **Substantial offline pools.** ~20 lines per tier plus 10 neck-, 10 torso- and
+  10 phone-specific lines, because the hand-written set is finite: once a tier is
   exhausted it degrades to a repeat rather than going silent. Gemini is what
   provides unlimited originals.
+- **Aimed batches.** `fallback_batch(part=…)` mixes in neck/torso lines, and
+  `fault="phone"` overrides that with the phone pool when the fault is not the
+  posture at all (`FAULT_LINES`). `RoastService` passes both from the context, and
+  `gemini_text` does the same so the model gets a phone line in its context.
 
 ## Invariants
 

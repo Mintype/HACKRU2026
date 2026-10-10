@@ -137,6 +137,10 @@ def _context_lines(context: Dict) -> List[str]:
 
     if context.get("worst_neck_angle") is not None:
         lines.append(f"- Worst forward-head angle so far: {context['worst_neck_angle']} degrees from vertical.")
+    if context.get("phone"):
+        lines.append(
+            "- This is not a posture problem: they are staring down at a phone or device."
+        )
     if context.get("worst_torso_angle"):
         lines.append(f"- Worst torso angle so far: {context['worst_torso_angle']} degrees from vertical.")
     if context.get("neck_drift") is not None and context.get("torso_drift") is not None:
@@ -284,6 +288,7 @@ class RoastWriter:
                 nice=nice,
                 exclude=list(exclude) + [i["text"] for i in items],
                 part=(context or {}).get("slouch_part"),
+                fault="phone" if (context or {}).get("phone") else None,
             )
         return items[:count]
 

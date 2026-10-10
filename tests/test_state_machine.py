@@ -5,6 +5,7 @@ from server.state_machine import (
     AWAY,
     CALIBRATING,
     GOOD,
+    PHONE,
     ROASTED,
     SLOUCHING,
     PostureStateMachine,
@@ -12,7 +13,7 @@ from server.state_machine import (
 )
 
 
-def reading(ts, score, *, person=True, seated=True, neck=15.0, torso=6.0, part=None) -> Dict:
+def reading(ts, score, *, person=True, seated=True, neck=15.0, torso=6.0, part=None, phone=False) -> Dict:
     item = {
         "ts": float(ts),
         "person": person,
@@ -20,6 +21,9 @@ def reading(ts, score, *, person=True, seated=True, neck=15.0, torso=6.0, part=N
         "neck_angle": neck,
         "torso_angle": torso,
         "score": score,
+        "phone": phone,
+        "head_down_deg": 52.0 if phone else 6.0,
+        "phone_seconds": 0.0,
     }
     if part is not None:
         item["slouch_part"] = part
@@ -277,6 +281,45 @@ class TestStateMachine(unittest.TestCase):
         snap = self.machine.snapshot(start + 3)
         self.assertIn("next_roast", snap)
         self.assertAlmostEqual(snap["next_roast"]["seconds"], 7.0, delta=0.6)
+
+    def test_phone_use_is_its_own_fault(self):
+        start = with_session(self.machine)
+        # sitting up perfectly well, but staring down at a phone
+        events = feed(self.machine, start, 2, 0.97, phone=True)
+        self.assertEqual(self.machine.state, PHONE)
+        self.assertEqual(self.machine.slouch_count, 0)
+        self.assertNotIn("roast_due", event_names(events))
+
+        events = feed(self.machine, start + 2, 10, 0.97, phone=True)
+        due = [e for e in events if e["event"] == "roast_due"]
+        self.assertEqual(len(due), 1)
+        self.assertEqual(due[0]["reason"], "phone")
+        self.assertTrue(due[0]["phone"])
+        # the pill stays on phone rather than flashing back to good
+        self.assertEqual(self.machine.state, PHONE)
+
+    def test_phone_roasts_repeat_every_cooldown(self):
+        self.machine.config.cooldown_seconds = 20.0
+        start = with_session(self.machine)
+        events = feed(self.machine, start, 100, 0.97, phone=True)
+        due = [e for e in events if e["event"] == "roast_due"]
+        self.assertGreaterEqual(len(due), 4)
+        gaps = [round(due[i + 1]["ts"] - due[i]["ts"], 1) for i in range(len(due) - 1)]
+        self.assertTrue(all(gap >= 20.0 for gap in gaps), gaps)
+
+    def test_phone_trigger_can_be_disabled(self):
+        self.machine.config.phone_threshold_seconds = 0.0
+        start = with_session(self.machine)
+        events = feed(self.machine, start, 30, 0.97, phone=True)
+        self.assertNotIn("roast_due", event_names(events))
+        self.assertEqual(self.machine.state, GOOD)
+
+    def test_the_countdown_reports_the_phone(self):
+        start = with_session(self.machine)
+        feed(self.machine, start, 3, 0.97, phone=True)
+        info = self.machine.time_to_roast(start + 3)
+        self.assertEqual(info["trigger"], "phone")
+        self.assertAlmostEqual(info["seconds"], 7.0, delta=0.6)
 
     def test_snapshot_fields(self):
         start = with_session(self.machine)

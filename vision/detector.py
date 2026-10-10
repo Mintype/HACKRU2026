@@ -27,6 +27,8 @@ class PostureDetector:
         seated_delay: float = 2.0,
         standup_delay: float = 1.0,
         min_visibility: float = 0.3,
+        phone_pitch_threshold: float = 40.0,
+        phone_delay: float = 1.5,
     ):
         self.landmarker = landmarker
         self.tolerance = float(tolerance)
@@ -34,6 +36,8 @@ class PostureDetector:
         self.seated_delay = float(seated_delay)
         self.standup_delay = float(standup_delay)
         self.min_visibility = float(min_visibility)
+        self.phone_pitch_threshold = float(phone_pitch_threshold)
+        self.phone_delay = float(phone_delay)
 
         self.baseline = dict(DEFAULT_BASELINE)
         self.calibrated = False
@@ -43,6 +47,7 @@ class PostureDetector:
         self._seated_since: Optional[float] = None
         self._away_since: Optional[float] = None
         self._hip_ref = None
+        self._phone_since: Optional[float] = None
 
     # -- baseline ---------------------------------------------------------
     def set_baseline(self, neck: float, torso: float) -> None:
@@ -59,6 +64,7 @@ class PostureDetector:
         if landmarks is None:
             self._seated_since = None
             self.seated = False
+            self._phone_since = None
             return self._reading(ts, person=False, seated=False, neck=None, torso=None, thigh=None)
 
         ear, shoulder, hip, knee = (
@@ -72,6 +78,13 @@ class PostureDetector:
         torso = angles.torso_angle(shoulder, hip)
         thigh = angles.thigh_angle(hip, knee) if knee[2] >= self.min_visibility else None
 
+        eye = landmarks.get("eye")
+        wrist = landmarks.get("wrist")
+        head_down = angles.head_pitch(eye, ear) if eye is not None and eye[2] >= self.min_visibility else None
+        # Hands off the lap: the classic holding-a-phone pose, shown for tuning.
+        hands_up = bool(wrist is not None and wrist[2] >= self.min_visibility and wrist[1] < hip[1])
+        phone = self._update_phone(ts, head_down)
+
         seated = self._update_seated(ts, thigh, torso, hip)
         reading = self._reading(ts, person=True, seated=seated, neck=neck, torso=torso, thigh=thigh)
         reading["points"] = {
@@ -81,7 +94,28 @@ class PostureDetector:
             "knee": (knee[0], knee[1]),
         }
         reading["side"] = landmarks.get("side", "right")
+        reading["head_down_deg"] = round(head_down, 1) if head_down is not None else None
+        reading["hands_up"] = hands_up
+        reading["phone"] = phone
+        reading["phone_seconds"] = (
+            round(ts - self._phone_since, 1) if phone and self._phone_since is not None else 0.0
+        )
         return reading
+
+    def _update_phone(self, ts: float, head_down: Optional[float]) -> bool:
+        """Sustained head-down: what a phone, a lap or a keyboard all look like.
+
+        Held for ``phone_delay`` so that a glance down does not count. This is a
+        heuristic, not object detection, so the threshold is exposed as a setting
+        and the raw ``head_down_deg`` is shown on the Debug panel to tune it.
+        """
+        looking_down = head_down is not None and head_down >= self.phone_pitch_threshold
+        if not looking_down:
+            self._phone_since = None
+            return False
+        if self._phone_since is None:
+            self._phone_since = ts
+        return (ts - self._phone_since) >= self.phone_delay
 
     # -- sit-down detection ----------------------------------------------
     def _update_seated(self, ts: float, thigh: Optional[float], torso: float, hip) -> bool:
@@ -133,6 +167,10 @@ class PostureDetector:
                 "neck_drift": None,
                 "torso_drift": None,
                 "slouch_part": None,
+                "head_down_deg": None,
+                "hands_up": False,
+                "phone": False,
+                "phone_seconds": 0.0,
             }
 
         neck_score = angles.posture_score(neck, self.baseline["neck"], self.tolerance)
@@ -165,6 +203,10 @@ class PostureDetector:
             "neck_drift": round(neck_drift, 2),
             "torso_drift": round(torso_drift, 2),
             "slouch_part": part,
+            "head_down_deg": None,
+            "hands_up": False,
+            "phone": False,
+            "phone_seconds": 0.0,
         }
 
     # -- overlay ----------------------------------------------------------

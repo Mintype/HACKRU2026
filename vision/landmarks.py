@@ -17,9 +17,12 @@ log = logging.getLogger(__name__)
 
 # BlazePose 33-point landmark indices.
 EAR = {"left": 7, "right": 8}
+EYE = {"left": 2, "right": 5}
 SHOULDER = {"left": 11, "right": 12}
+WRIST = {"left": 15, "right": 16}
 HIP = {"left": 23, "right": 24}
 KNEE = {"left": 25, "right": 26}
+NOSE = 0
 
 MODEL_URLS = {
     "lite": (
@@ -50,7 +53,7 @@ def pick_side(pose_landmarks) -> str:
     scores = {}
     for side in ("left", "right"):
         total = 0.0
-        for indices in (EAR, SHOULDER, HIP, KNEE):
+        for indices in (EAR, EYE, SHOULDER, WRIST, HIP, KNEE):
             lm = pose_landmarks[indices[side]]
             vis = getattr(lm, "visibility", None)
             total += float(vis) if vis is not None else 1.0
@@ -132,12 +135,17 @@ class PoseLandmarker:
             vis = getattr(lm, "visibility", None)
             return (float(lm.x) * width, float(lm.y) * height, float(vis) if vis is not None else 1.0)
 
+        nose = lms[NOSE]
+        nose_vis = getattr(nose, "visibility", None)
         return {
             "side": side,
             "ear": point(EAR),
+            "eye": point(EYE),
             "shoulder": point(SHOULDER),
+            "wrist": point(WRIST),
             "hip": point(HIP),
             "knee": point(KNEE),
+            "nose": (float(nose.x) * width, float(nose.y) * height, float(nose_vis) if nose_vis is not None else 1.0),
         }
 
     def close(self) -> None:

@@ -105,12 +105,15 @@ frame:
 {
   "ts": 1760101234.5, "person": true, "seated": true,
   "neck_angle": 18.4, "torso_angle": 7.1, "score": 0.86,
-  "neck_drift": 6.4, "torso_drift": 3.1, "slouch_part": "neck"
+  "neck_drift": 6.4, "torso_drift": 3.1, "slouch_part": "neck",
+  "head_down_deg": 8.0, "phone": false, "phone_seconds": 0.0, "hands_up": false
 }
 ```
 
 `slouch_part` says which part is giving way (`neck`, `torso` or `even`), and the
-drifts are how far each angle has moved past the baseline. The roasts use them.
+drifts are how far each angle has moved past the baseline. `head_down_deg` is how
+far the head is tilted down, and `phone` is the sustained-head-down heuristic
+built on it. The roasts use all of it.
 
 ### 2. Calibration and sit-down detection
 
@@ -228,6 +231,10 @@ cooldown:
 | ------- | --------- | ------- |
 | **sustained slouch** | score below `lower_threshold` for `roast_seconds` | 0.70 for 10 s |
 | **bad posture** | score below `bad_score_threshold` held for `bad_score_seconds` | 0.45 for 3 s |
+| **phone** | head down (`head_down_deg` over the pitch threshold) for `phone_threshold_seconds` | 10 s |
+
+The phone trigger is separate on purpose: someone can sit up perfectly straight and
+still stare into their lap, and the posture score says nothing about it.
 
 ```
 sit down ──2s─▶ seated ──5s─▶ calibrated ──▶ slouch ──▶ ROAST
@@ -299,6 +306,7 @@ overrides a changed default, which is how a "10 second" roast can keep taking 30
 | `upper_threshold` | `0.80` | 0.05–1.0 | Score **above** this ⇒ good. Between the two thresholds the state does not change. |
 | `bad_score_threshold` | `0.45` | 0–1.0 | The deep-slouch score that roasts without waiting out `roast_seconds`. `0` disables this trigger. |
 | `bad_score_seconds` | `3` | 0–60 | How long the bad score must hold before that trigger fires, so one noisy frame cannot cost an API call. |
+| `phone_threshold_seconds` | `10` | 0–600 | How long they may stare down at a phone/device before being roasted. `0` disables it. |
 | `delta_angle` | `20` | 1–60 | Tolerance: how many degrees past the baseline map to a score of `0`. Smaller ⇒ more sensitive. |
 
 ### Vision parameters
@@ -314,7 +322,9 @@ rather than website settings.
 | `seated_threshold` | `30°` | Thigh angle from horizontal below which the person counts as seated. |
 | `seated_delay` | `2 s` | How long that must hold before a session starts, so someone still sitting down is not roasted. |
 | `standup_delay` | `1 s` | How long "not seated" must hold before the state goes `away`. |
-| `min_visibility` | `0.3` | Knee visibility below which the thigh angle is ignored and the desk fallback is used. |
+| `min_visibility` | `0.3` | Knee/eye visibility below which that landmark is ignored. |
+| `phone_pitch_threshold` | `40°` | Head-down angle at which the phone heuristic starts counting. **Tune this against your camera**: the Debug panel shows the live `head_down_deg`. |
+| `phone_delay` | `1.5 s` | How long the head must stay down before it counts as phone use, so a glance down does not trigger it. |
 | `model` | `lite` | MediaPipe pose model: `lite`, `full` or `heavy`. `lite` is the one that keeps 10+ fps on a Pi. |
 | `fps_target` | `10` | Frames per second the vision loop aims for. Posture changes slowly; 5 fps of detection is still enough. |
 | `jpeg_quality` | `70` | JPEG quality for the shared frame that `/video_feed` serves. |
@@ -490,7 +500,7 @@ Deliberately blunt, so a glance is enough:
 | Colour | Means |
 | ------ | ----- |
 | **green** | good posture — score above the upper threshold |
-| **red** | bad posture — `slouching` *and* `roasted` are the same badness, only the pill text distinguishes them |
+| **red** | bad posture — `slouching`, `roasted` and `phone` are the same badness, only the pill text distinguishes them |
 | amber | undecided: the score is in the narrow band between the two thresholds, so the state has not changed yet |
 | grey | `away` — nobody seated, so nothing is judged |
 | blue | `calibrating` |
@@ -513,6 +523,8 @@ Score          0.00   raw 0.00
 Neck           41.8°   +29.8°
 Torso          18.1°   +14.1°
 Failing part   neck
+Phone          yes  8.3s
+Head down      49°
 Slouched       8.7s
 Next roast     8.2s   cooldown      <- the countdown, and what is holding it
 Cooldown       8.2s
