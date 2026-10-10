@@ -29,11 +29,21 @@ def offline_tts():
     return tts
 
 
+def offline_eleven():
+    """An ElevenLabsTTS that cannot reach the network."""
+    from voice.eleven_tts import ElevenLabsTTS
+
+    tts = ElevenLabsTTS()
+    tts.api_key = ""
+    return tts
+
+
 def offline_service(**kwargs):
     from voice.service import RoastService
 
     kwargs.setdefault("writer", offline_writer())
     kwargs.setdefault("tts", offline_tts())
+    kwargs.setdefault("eleven", offline_eleven())
     return RoastService(**kwargs)
 
 
@@ -338,6 +348,7 @@ class TestVoiceMode(unittest.TestCase):
     def test_voice_is_recovered_from_the_filename(self):
         from voice.service import RoastService
 
+        self.assertEqual(RoastService._voice_from_path("/x/roast_ab_elevenlabs.wav"), "elevenlabs")
         self.assertEqual(RoastService._voice_from_path("/x/roast_ab_gemini.wav"), "gemini")
         self.assertEqual(RoastService._voice_from_path("/x/roast_ab_local.wav"), "local")
         self.assertEqual(RoastService._voice_from_path("/x/roast_ab.wav"), "unknown")
@@ -543,6 +554,161 @@ class TestVoiceMood(unittest.TestCase):
         tts = GeminiTTS(api_key="fake")
         self.assertEqual(tts.style_for(None), tts.style_for("medium"))
         self.assertEqual(tts.style_for("nonsense"), tts.style_for("medium"))
+
+
+class TestProviderOrder(unittest.TestCase):
+    """auto should prefer ElevenLabs, then Gemini, then the local engine."""
+
+    class _Settings:
+        def __init__(self, mode):
+            self._values = {"tts_mode": mode, "nice_mode": False}
+
+        def get(self, key, default=None):
+            return self._values.get(key, default)
+
+    class _Player:
+        route = "off"
+
+        def play_clip(self, clip):
+            return True
+
+    class _Voice:
+        def __init__(self, available=True):
+            self.available = available
+            self.ready = available
+            self.last_error = None
+
+        def synthesize(self, text, path, tier=None):
+            if not self.available:
+                return False
+            pathlib.Path(path).write_bytes(b"RIFF....")
+            return True
+
+    def _service(self, mode, eleven=True, gemini=True, local=True):
+        return offline_service(
+            player=self._Player(),
+            eleven=self._Voice(eleven),
+            tts=self._Voice(gemini),
+            local_tts=self._Voice(local),
+            settings=self._Settings(mode),
+            context_provider=lambda: {},
+            pool_size=2,
+        )
+
+    def _voice_for(self, mode, **kwargs):
+        service = self._service(mode, **kwargs)
+        with tempfile.TemporaryDirectory() as tmp:
+            original = config.ROAST_DIR
+            config.ROAST_DIR = pathlib.Path(tmp)
+            try:
+                return service._synthesize("Sit up.", "mild")
+            finally:
+                config.ROAST_DIR = original
+
+    def test_auto_prefers_elevenlabs(self):
+        self.assertTrue(self._voice_for("auto").endswith("_elevenlabs.wav"))
+
+    def test_auto_uses_gemini_without_an_elevenlabs_key(self):
+        self.assertTrue(self._voice_for("auto", eleven=False).endswith("_gemini.wav"))
+
+    def test_auto_falls_back_to_local_when_no_cloud_voice_works(self):
+        self.assertTrue(self._voice_for("auto", eleven=False, gemini=False).endswith("_local.wav"))
+
+    def test_forced_elevenlabs_does_not_mix_in_gemini(self):
+        self.assertTrue(self._voice_for("elevenlabs").endswith("_elevenlabs.wav"))
+
+    def test_forced_elevenlabs_is_silent_without_a_key(self):
+        self.assertIsNone(self._voice_for("elevenlabs", eleven=False))
+
+    def test_forced_gemini_does_not_use_elevenlabs(self):
+        self.assertTrue(self._voice_for("gemini").endswith("_gemini.wav"))
+
+
+class TestElevenLabs(unittest.TestCase):
+    def test_request_carries_key_voice_and_format(self):
+        from voice.eleven_tts import ElevenLabsTTS
+
+        tts = ElevenLabsTTS(api_key="k", voice_id="VOICE123", model="m1", output_format="pcm_24000")
+        url, headers, body = tts.build_request("Sit up.", tts.settings_for("spicy"))
+        self.assertIn("/text-to-speech/VOICE123", url)
+        self.assertIn("output_format=pcm_24000", url)
+        self.assertEqual(headers["xi-api-key"], "k")
+        payload = json.loads(body)
+        self.assertEqual(payload["text"], "Sit up.")
+        self.assertEqual(payload["model_id"], "m1")
+        self.assertIn("stability", payload["voice_settings"])
+
+    def test_mood_varies_by_tier(self):
+        from voice.eleven_tts import ElevenLabsTTS
+
+        tts = ElevenLabsTTS(api_key="k")
+        mild, spicy = tts.settings_for("mild"), tts.settings_for("spicy")
+        self.assertNotEqual(mild, spicy)
+        self.assertLess(spicy["stability"], mild["stability"])  # more animated
+        self.assertGreater(spicy["style"], mild["style"])
+        self.assertEqual(tts.settings_for("nonsense"), tts.settings_for(None))
+
+    def test_synthesize_writes_a_playable_wav(self):
+        from voice.eleven_tts import ElevenLabsTTS
+
+        tts = ElevenLabsTTS(api_key="k")
+        tts._call = lambda text, settings, with_style=True: b"\x00\x00" * 12000
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp) / "line.wav"
+            self.assertTrue(tts.synthesize("Sit up.", out, "mild"))
+            with wave.open(str(out), "rb") as wav:
+                self.assertEqual(wav.getframerate(), 24000)
+                self.assertEqual(wav.getnchannels(), 1)
+            self.assertEqual(tts.voice_used, tts.voice_id)
+
+    def test_without_a_key_it_refuses(self):
+        from voice.eleven_tts import ElevenLabsTTS
+
+        tts = ElevenLabsTTS(api_key="")
+        tts.api_key = ""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(tts.synthesize("Sit up.", pathlib.Path(tmp) / "x.wav", "mild"))
+        self.assertIn("ELEVENLABS_API_KEY", tts.last_error or "")
+
+    def test_a_422_retries_without_the_style_setting(self):
+        import io
+        import urllib.error
+        import urllib.request
+
+        from voice.eleven_tts import ElevenLabsTTS
+
+        tts = ElevenLabsTTS(api_key="k")
+        seen = []
+
+        def fake_urlopen(request, timeout=None):
+            seen.append(json.loads(request.data.decode())["voice_settings"])
+            if len(seen) == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url, 422, "Unprocessable", {}, io.BytesIO(b'{"detail":"bad"}')
+                )
+
+            class Response:
+                def read(self):
+                    return b"\x00\x00" * 10
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+            return Response()
+
+        original = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            pcm = tts._call("Sit up.", tts.settings_for("mild"))
+        finally:
+            urllib.request.urlopen = original
+        self.assertEqual(len(seen), 2)
+        self.assertIn("style", seen[0])
+        self.assertNotIn("style", seen[1])
+        self.assertTrue(pcm)
 
 
 if __name__ == "__main__":

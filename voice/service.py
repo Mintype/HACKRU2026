@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Callable, Deque, Dict, List, Optional
 
 import config
+from .eleven_tts import ElevenLabsTTS
 from .gemini_text import RoastWriter
 from .gemini_tts import GeminiTTS
 from .insults import InsultLog
@@ -37,6 +38,7 @@ class RoastService:
         player: AudioPlayer,
         writer: Optional[RoastWriter] = None,
         tts: Optional[GeminiTTS] = None,
+        eleven: Optional[ElevenLabsTTS] = None,
         local_tts: Optional[LocalTTS] = None,
         settings=None,
         context_provider: Optional[Callable[[], Dict]] = None,
@@ -47,6 +49,7 @@ class RoastService:
         self.player = player
         self.writer = writer if writer is not None else RoastWriter()
         self.tts = tts if tts is not None else GeminiTTS()
+        self.eleven = eleven if eleven is not None else ElevenLabsTTS()
         self.local_tts = local_tts if local_tts is not None else LocalTTS()
         self.settings = settings
         self.context_provider = context_provider or (lambda: {})
@@ -273,11 +276,11 @@ class RoastService:
         return items[:count]
 
     def _tts_mode(self) -> str:
-        """auto = Gemini when it can, else local; or force one for consistency."""
+        """auto = best voice available, else local; or force one for consistency."""
         if self.settings is None:
             return "auto"
         mode = str(self.settings.get("tts_mode") or "auto").lower()
-        return mode if mode in {"auto", "gemini", "local"} else "auto"
+        return mode if mode in {"auto", "elevenlabs", "gemini", "local"} else "auto"
 
     @staticmethod
     def _voice_from_path(path: Optional[str]) -> Optional[str]:
@@ -288,6 +291,8 @@ class RoastService:
             return "gemini"
         if name.endswith("_local.wav"):
             return "local"
+        if name.endswith("_elevenlabs.wav"):
+            return "elevenlabs"
         return "unknown"
 
     def _synthesize(self, text: str, tier: Optional[str] = None) -> Optional[str]:
@@ -305,19 +310,26 @@ class RoastService:
             path = config.ROAST_DIR / f"roast_{digest}_{voice}.wav"
             if path.exists() and path.stat().st_size > 0:
                 return str(path)
+            if voice == "elevenlabs":
+                if mode in {"local", "gemini"} or not self.eleven.available:
+                    return None
+                return str(path) if self.eleven.synthesize(text, path, tier) else None
             if voice == "gemini":
-                if mode == "local" or not self.tts.ready:
+                if mode in {"local", "elevenlabs"} or not self.tts.ready:
                     return None
                 return str(path) if self.tts.synthesize(text, path, tier) else None
-            if mode == "gemini" or not self.local_tts.available:
+            if mode in {"gemini", "elevenlabs"} or not self.local_tts.available:
                 return None
             return str(path) if self.local_tts.synthesize(text, path) else None
 
         if mode == "local":
             return attempt("local")
+        if mode == "elevenlabs":
+            return attempt("elevenlabs")
         if mode == "gemini":
             return attempt("gemini")
-        return attempt("gemini") or attempt("local")
+        # auto: best voice available, then the others, then offline
+        return attempt("elevenlabs") or attempt("gemini") or attempt("local")
 
     # -- status -----------------------------------------------------------
     def status(self) -> Dict:
@@ -329,6 +341,8 @@ class RoastService:
             "gemini_tts": self.tts.available,
             "gemini_tts_ready": getattr(self.tts, "ready", self.tts.available),
             "gemini_tts_error": self.tts.last_error,
+            "elevenlabs": self.eleven.available,
+            "elevenlabs_error": self.eleven.last_error,
             "local_tts": self.local_tts.engine,
             "tts_mode": self._tts_mode(),
             "roast_source": self._roast_source(),

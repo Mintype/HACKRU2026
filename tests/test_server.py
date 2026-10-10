@@ -173,6 +173,8 @@ class TestSettings(unittest.TestCase):
         settings = Settings(path=self.path)
         settings.update({"tts_mode": "local"})
         self.assertEqual(settings.get("tts_mode"), "local")
+        settings.update({"tts_mode": "elevenlabs"})
+        self.assertEqual(settings.get("tts_mode"), "elevenlabs")
         settings.update({"tts_mode": "nonsense"})
         self.assertEqual(settings.get("tts_mode"), "auto")
 

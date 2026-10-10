@@ -31,7 +31,7 @@ DEFAULTS: Dict[str, Any] = {
     # voice / website
     "nice_mode": False,
     "mirror": False,
-    "tts_mode": "auto",  # auto | gemini | local  (force one for a consistent voice)
+    "tts_mode": "auto",  # auto | elevenlabs | gemini | local  (force one for a consistent voice)
     "audio_route": "bluetooth",  # bluetooth | cast | off
     "roast_source": "live",  # live | pool  (live asks Gemini at the moment of the slouch)
     "live_api_cooldown_seconds": 30.0,
@@ -60,7 +60,7 @@ BOUNDS: Dict[str, tuple] = {
 
 AUDIO_ROUTES = ("bluetooth", "cast", "off")
 ROAST_SOURCES = ("live", "pool")
-TTS_MODES = ("auto", "gemini", "local")
+TTS_MODES = ("auto", "elevenlabs", "gemini", "local")
 MODELS = ("lite", "full", "heavy")
 
 

@@ -118,6 +118,7 @@ python run.py --simulate --no-audio
 ├── voice/                    # ROLE 3 — Gemini roasts, pool, audio
 │   ├── prompts/              #   editable prompt text: roast.txt, nice.txt
 │   ├── gemini_text.py        #   structured roast batches
+│   ├── eleven_tts.py         #   ElevenLabs voice (preferred)
 │   ├── gemini_tts.py         #   text -> PCM -> WAV
 │   ├── tts_local.py          #   espeak-ng / piper / say / SAPI fallback
 │   ├── wavutil.py            #   WAV writing, lead silence, normalise
@@ -196,6 +197,23 @@ score trigger entirely.
 In `live` mode the pool stops refilling, so the two paths never both spend the
 Gemini quota. Live is a little slower (network round trip) but never repeats a
 line; the pool is instant but finite.
+
+### Which voice speaks
+
+`tts_mode` (Controls → Voice) picks the engine. `auto` walks this chain and uses
+the first that answers:
+
+| Order | Engine | Notes |
+| ----- | ------ | ----- |
+| 1 | **ElevenLabs** (`ELEVENLABS_API_KEY`) | Preferred: its free tier is ~10k characters/month, which suits these one-liners far better than a per-day request cap. Mood comes from `voice_settings` — lower stability and more style for a repeat offender. |
+| 2 | **Gemini TTS** (`GEMINI_API_KEY`) | Free tier is ~10 requests/day **per model**, so it walks a chain of TTS models (`voice/gemini_tts.py`) instead of dying on one. |
+| 3 | **Local** | espeak-ng / piper / macOS `say` / Windows SAPI — unlimited and works offline. |
+
+`elevenlabs`, `gemini` or `local` force a single engine, so the voice stays
+consistent (a forced engine goes quiet rather than mixing in another voice when
+it has no key). Voiced clips are cached per engine — `roast_<hash>_elevenlabs.wav`
+— so switching engine re-voices new lines and leaves old ones alone; clear
+`data/roasts/` to re-voice everything.
 
 ### Roast prompts
 
@@ -350,6 +368,9 @@ Copy `.env.example` to `.env` and fill it in. `.env` is git-ignored.
 | `GEMINI_API_KEY` | from Google AI Studio; without it the app uses fallbacks |
 | `GEMINI_TEXT_MODEL` | text model id (check Google's models page on the day) |
 | `GEMINI_TTS_MODEL` / `GEMINI_TTS_VOICE` | TTS model and voice persona |
+| `ELEVENLABS_API_KEY` | preferred voice; without it `auto` uses Gemini then local |
+| `ELEVENLABS_VOICE_ID` | voice to use (default Rachel, `21m00Tcm4TlvDq8ikWAM`) |
+| `ELEVENLABS_MODEL` | defaults to `eleven_flash_v2_5` |
 | `NEST_BLUETOOTH_MAC` | from `bluetoothctl devices` |
 | `NEST_CAST_NAME` | friendly name for the Wi-Fi cast backup |
 | `POSTURE_BLUETOOTH_PLAYER` | override player command (`paplay`, `pw-play`, `aplay`) |

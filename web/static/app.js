@@ -624,6 +624,7 @@
       voice.gemini_tts && ttsReady ? "ok" : "warn"
     );
     setState($("sys-local"), voice.local_tts || "none", voice.local_tts ? "ok" : "none");
+    setState($("sys-eleven"), voice.elevenlabs ? "live" : "no key", voice.elevenlabs ? "ok" : "none");
 
     // A pool voiced by more than one engine sounds inconsistent, so say so.
     const voices = (voice.pool && voice.pool.voices) || {};
