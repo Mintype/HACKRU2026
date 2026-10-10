@@ -12,6 +12,11 @@ Public contract (agreed in hour 0, everything downstream depends on it)::
     }
 
 Downstream code only ever sees readings -- never frames.
+
+The mobile app (``--mobile``) uses the same contract for one reading per tracked
+person, and adds the fields :mod:`vision.multipose` measures: ``view`` (side /
+front / back), the metric that view supports, and normalized ``points`` so the
+phone can draw its own skeleton.
 """
 
 __all__ = [
@@ -19,6 +24,7 @@ __all__ = [
     "calibrate",
     "detector",
     "landmarks",
+    "multipose",
     "source",
     "synthetic",
 ]

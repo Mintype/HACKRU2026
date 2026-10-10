@@ -84,10 +84,65 @@ SIDE_VIEW_HINT = (
 )
 
 
+def _tls_available() -> bool:
+    """Can Flask serve HTTPS with a throw-away certificate?
+
+    A phone browser refuses ``getUserMedia`` on a plain ``http://`` LAN origin, so
+    mobile mode wants TLS; ``cryptography`` is what Werkzeug's adhoc context needs.
+    """
+    try:
+        import cryptography  # noqa: F401
+
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def mobile_urls(port: int, secure: bool = True) -> list:
+    """The addresses a phone can actually open, so nobody has to guess an IP."""
+    import socket
+
+    scheme = "https" if secure else "http"
+    urls: list = []
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip and not ip.startswith("127.") and ip not in urls:
+                urls.append(ip)
+    except Exception:  # noqa: BLE001
+        pass
+    if not urls:
+        # A UDP socket to a public address sends nothing, but it does tell the OS
+        # which interface would be used - which is the one the phone can reach.
+        try:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            probe.connect(("8.8.8.8", 80))
+            urls.append(probe.getsockname()[0])
+            probe.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    lines = ["  phone  : open this on the phone (same WiFi as this computer):"]
+    if urls:
+        lines += [f"           {scheme}://{ip}:{port}/m" for ip in urls]
+    else:
+        lines.append(f"           {scheme}://<this-computer's-LAN-IP>:{port}/m")
+    if secure:
+        lines.append("           the certificate is self-signed: tap Advanced -> Proceed once")
+    else:
+        lines.append("           no HTTPS: the phone browser will block the camera (see the README)")
+    return lines
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Posture Coach: side-view posture coach that roasts you.")
     parser.add_argument("--simulate", "--fake", dest="simulate", action="store_true",
                         help="run the scripted fake readings instead of a camera")
+    parser.add_argument("--mobile", action="store_true",
+                        help="phone-as-camera mode: no local camera, phones post frames to /m "
+                             "and get a live roster of everyone in view (see the README)")
+    parser.add_argument("--mobile-people", dest="mobile_people", type=int, default=None, metavar="N",
+                        help="with --mobile, how many people to track at once (default: the setting, 3)")
     parser.add_argument("--camera", type=int, default=None,
                         help="camera index to use (default: remembered setting, usually 0)")
     parser.add_argument("--camera-backend", dest="camera_backend", type=str, default="auto",
@@ -327,6 +382,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         host=args.host,
         port=args.port,
         settings_path=args.settings,
+        mobile=args.mobile,
+        mobile_max_people=args.mobile_people,
         settings_overrides=(
             {
                 "roast_seconds": 10,
@@ -342,28 +399,41 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.demo:
         print("  demo   : roast 10s / cooldown 15s (not saved unless you press Save)")
 
-    if coach.simulate:
-        mode = "SIMULATED feed"
+    if coach.mobile_mode:
+        mode = f"MOBILE - up to {coach.mobile_max_people} people, camera in the browser"
+    elif coach.simulate:        mode = "SIMULATED feed"
     elif args.video is not None:
         mode = f"video file: {Path(args.video).name}"
     else:
         mode = f"camera {coach.camera_index} (side view)"
     print(f"  mode   : {mode}")
     print(f"  audio  : {coach.player.route}")
-    if not coach.simulate and args.video is None:
+    if coach.mobile_mode:
+        secure = _tls_available()
+        for line in mobile_urls(args.port, secure):
+            print(line)
+    if not coach.simulate and args.video is None and not coach.mobile_mode:
         print(SIDE_VIEW_HINT)
 
     if args.preview:
         return preview_loop(coach)
 
-    print(f"  website: http://localhost:{args.port}  (http://posture.local:{args.port} on the LAN)")
+    if not coach.mobile_mode:
+        print(f"  website: http://localhost:{args.port}  (http://posture.local:{args.port} on the LAN)")
     print("  press Ctrl+C to stop\n")
 
     coach.start()
     try:
         # The reloader is off on purpose: it starts the app twice and the second
         # copy cannot open the camera.
-        app.run(host=args.host, port=args.port, threaded=True, debug=False, use_reloader=False)
+        app.run(
+            host=args.host,
+            port=args.port,
+            threaded=True,
+            debug=False,
+            use_reloader=False,
+            ssl_context=("adhoc" if coach.mobile_mode and _tls_available() else None),
+        )
     except KeyboardInterrupt:
         pass
     finally:

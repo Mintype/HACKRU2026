@@ -7,3 +7,6 @@ opencv-contrib-python>=4.9
 python-dotenv>=1.0
 google-genai>=1.0
 pychromecast>=14.0
+# Only needed for `--mobile`, which serves HTTPS with a throw-away certificate:
+# phone browsers refuse to hand over the camera on a plain http:// LAN origin.
+cryptography>=42.0

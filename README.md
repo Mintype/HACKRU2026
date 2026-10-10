@@ -36,6 +36,7 @@ side webcam ─▶ MediaPipe landmarks ─▶ angles ─▶ score ─▶ state m
   - [HTTP API](#http-api)
   - [Files and data](#files-and-data)
 - [The website](#the-website)
+- [Mobile mode — the phone as the camera](#mobile-mode--the-phone-as-the-camera)
 - [Raspberry Pi setup](#raspberry-pi-setup)
 - [Troubleshooting](#troubleshooting)
 - [Testing checklist](#testing-checklist)
@@ -117,6 +118,11 @@ are the raw material for sleep detection: `head_down_deg` is the head tilt,
 `head_ref_deg` is the tilt recorded while calibrating, `head_drop_deg` is the
 difference, and `motion` is how much the joints moved since the last frame.
 `sleepy` is vision's instant verdict on all of it. The roasts use all of it.
+
+That is the **side-view, one-person** path. `--mobile` swaps in
+`vision/multipose.py`, which measures *several* people **from any angle** and adds
+the fields that needs — see [Mobile mode](#mobile-mode--the-phone-as-the-camera).
+The reading contract, the state machine and the voice layer do not change.
 
 ### 2. Calibration and sit-down detection
 
@@ -240,7 +246,7 @@ a lock; routes only read it, so extra browser tabs cost almost nothing.
 ## When a roast fires
 
 Two independent triggers, either one fires `roast_due`, both gated by the same
-cooldown:
+cooldown (in mobile mode every tracked person has their own copy of this machine):
 
 | Trigger | Condition | Default |
 | ------- | --------- | ------- |
@@ -356,6 +362,7 @@ overrides a changed default, which is how a "10 second" roast can keep taking 30
 | `bad_score_threshold` | `0.45` | 0–1.0 | The deep-slouch score that roasts without waiting out `roast_seconds`. `0` disables this trigger. |
 | `bad_score_seconds` | `3` | 0–60 | How long the bad score must hold before that trigger fires, so one noisy frame cannot cost an API call. |
 | `sleep_threshold_seconds` | `25` | 0–600 | How long they may be collapsed, motionless and head down before being accused of sleeping. `0` disables the trigger. |
+| `mobile_max_people` | `3` | 1–6 | Mobile only: how many people to track per frame (and how many poses one inference looks for). More people is more CPU — the lite model costs ~30 ms/frame for 3 on a laptop. Restart to change it. |
 | `delta_angle` | `20` | 1–60 | Tolerance: how many degrees past the baseline map to a score of `0`. Smaller ⇒ more sensitive. |
 
 ### Vision parameters
@@ -480,6 +487,8 @@ offender does not sound like a first slip.
 | Flag | Meaning |
 | ---- | ------- |
 | `--simulate` / `--fake` | Scripted readings + synthetic feed. No camera, no MediaPipe needed. The script is a repeating loop: away → good → **sleep** (long enough to trip the slow trigger) → good → slouch → good → slouch. |
+| `--mobile` | Phone-as-camera mode (see [Mobile mode](#mobile-mode--the-phone-as-the-camera)). No local camera at all: phones post frames to `/m` and get a live roster of everyone in view. Serves HTTPS with a throw-away certificate, because browsers only hand out the camera on a secure origin. |
+| `--mobile-people N` | With `--mobile`: how many people to track at once (default: the `mobile_max_people` setting, 3). |
 | `--demo` | Short thresholds for a fast demo: roast 10 s, cooldown 15 s, calibration 3 s, pool 2/tier. Applied in memory, not saved. |
 | `--preview` | Standalone OpenCV window instead of the website. Best way to aim the camera. |
 | `--video FILE` | Run the real detector against a recording instead of the webcam. |
@@ -500,6 +509,9 @@ offender does not sound like a first slip.
 | Method | Route | Purpose |
 | ------ | ----- | ------- |
 | GET | `/` | The website. |
+| GET | `/m` | The **mobile** page: camera in the browser, roster of everyone in view. Needs `--mobile`. |
+| POST | `/m/frame?device=ID` | One JPEG frame from a phone. Returns the people in it (scores, views, normalized joints), the roster and any roasts earned. 409 without `--mobile`. |
+| GET | `/m/state` | The current roster without uploading a frame (for a reload or a slow poll). |
 | GET | `/video_feed` | Live annotated MJPEG stream. |
 | GET | `/events` | Server-sent events. Message kinds: `reading` (~2/s, includes `next_roast` for the countdown), `event` (state changes, roast_due), `roast` (a clip was chosen), `settings`, `calibrating`. |
 | GET | `/api/stats` | Current session stats plus the live state, reading, settings and `next_roast` (the countdown: seconds, which trigger, and whether a cooldown is holding it). |
@@ -596,6 +608,123 @@ terminal.
 
 ---
 
+## Mobile mode — the phone as the camera
+
+```bash
+python run.py --mobile            # then open the https://<lan-ip>:5000/m it prints
+```
+
+Same server, same brains, different camera. The Pi app needs a USB webcam pointed at
+your chair; mobile mode needs a phone, and the phone can walk around. **The AI still
+runs on the server:** MediaPipe pose, the scoring, Gemini writing the roasts and
+ElevenLabs speaking them. The phone captures a frame, posts a JPEG, draws the
+skeleton it is told about and speaks the insult it receives. Nothing expensive runs
+in the browser, and no video ever travels back down the wire.
+
+```
+phone camera ──JPEG ~7/s──▶ /m/frame ──▶ MediaPipe (up to N people)
+                                              │
+                    per-person tracking ──────┤──▶ view angle (side/front/back)
+                                              │    + the metric that view supports
+                                              ▼
+                     roster JSON ◀── scores, states, joints, roasts
+                                              │
+                        roast_due ──▶ Gemini/ElevenLabs ──▶ SSE ──▶ the phone speaks it
+```
+
+### Why the angles change everything
+
+The desktop app measures one seated person **from the side**: neck and torso angles
+from the ear→shoulder→hip chain. Point a phone at a room and that assumption dies —
+a neck angle means nothing when someone is facing you. So mobile mode first works
+out **which way the camera is seeing them**:
+
+| View | How it is detected | What is measured |
+| ---- | ------------------ | ---------------- |
+| **side** | the two shoulders nearly overlap in x (spread ÷ torso length < 0.45) | neck and torso angles — the same metrics the Pi app uses |
+| **front** | shoulders spread across the torso, and a face is visible | **head sink** (how far the head has dropped between the shoulders, in shoulder widths) and **shoulder tilt** |
+| **back** | shoulders spread, but no nose or eyes visible | head sink, shoulder tilt |
+
+Every score is then measured **against that person's own upright in that view**:
+watch somebody for `calibration_seconds` (2 s) and their shoulder-to-head distance,
+or their neck angle, becomes their zero. Turn to a new angle and a new reference is
+learned for it. That is the honest fix for "all angles": don't pretend a front view
+can measure forward-head angles — measure what that view can actually see, and say
+so on screen (`side · neck 41°`, `front · head sink 24%`).
+
+**The limits, plainly.** MediaPipe still needs most of the upper body visible, so a
+head-and-shoulders shot at 3 m will not work. Identity is positional and per frame:
+if somebody leaves and comes back, they may be measured as a new person (ids are
+reused, so "Person 1" usually comes back as "Person 1"). And a baseline learned
+while somebody is already slumped will call that slump normal — ask people to sit up
+for the first second, or press recalibrate on the desktop page.
+
+### The roster
+
+The phone shows everyone in view, **worst first**, each with a colour-coded score,
+which view they are being measured from, and the metric behind it. Good and bad
+counts sit in the top bar. A roast names the person out loud ("Person 2, sit up") and
+flashes their row, because a group insult lands on nobody.
+
+Which person gets roasted is decided **per person**, by that person's own state
+machine — the same `PostureStateMachine` the Pi app uses, one per tracked person, so
+hysteresis, the roast timer and the cooldown behave identically. Mobile only changes
+two things: calibration is quick (2 s, not 5) and sleep detection is off, because
+people walk around in a room instead of sitting still at a desk.
+
+The phone also drives the **desktop HUD**: the frames it posts are stored as the
+shared frame, so `/video_feed` shows the phone's camera and the Debug panel ticks
+from the worst person in view. The picture is shared even when nobody is detected —
+aiming the phone is exactly when you want to see what it sees — and the HUD then
+simply reads `away` / `nobody`. Open the laptop page on the projector and hand
+somebody a phone.
+
+### Getting the camera to work on a phone
+
+Browsers only give a page the camera on a **secure origin**, and `http://192.168.x.x`
+is not one. `--mobile` therefore serves HTTPS with a throw-away self-signed
+certificate (that is what `cryptography` in `requirements.txt` is for) and prints the
+`https://` URL to open. Tap **Advanced → Proceed** once and the camera works. If you
+would rather stay on HTTP, or the certificate gets in the way, use Chrome's
+`chrome://flags/#unsafely-treat-insecure-origin-as-secure` and add your `http://`
+origin. The phone page detects either situation and tells you which one you are in
+instead of silently doing nothing.
+
+On the phone, the settings sheet has the knobs that matter for a demo: **speak
+roasts on this phone**, mirror, skeleton on/off, frames per second, and which camera
+(back to point at other people, front to point at yourself).
+
+### Trying it without a phone
+
+```bash
+python run.py --mobile
+# then, on the desktop, in a second terminal:
+curl -k -X POST --data-binary @frame.jpg -H 'Content-Type: image/jpeg' \
+     https://127.0.0.1:5000/m/frame?device=laptop
+```
+
+Or drive it from a browser at `https://127.0.0.1:5000/m` (localhost counts as secure,
+so the camera works there too). For screenshots and debugging, the page exposes its
+internals as `window.__pc`, so this renders a roster with no camera at all:
+
+```js
+__pc.handleFrame({ok: true, seen: 1, good: 0, bad: 1, people: [], roster: [
+  {id: 1, label: "Person 1", view: "side", metric: "side · neck 41°", score: 0.12,
+   state: "slouched", good: false, bad: true, calibrating: false, seen_for: 9,
+   stale_for: 0, points: {}}
+]});
+```
+
+### Tests
+
+The whole mobile pipeline is testable offline: `vision/multipose.py` takes plain
+pose dicts (no cv2, no MediaPipe) and `server/mobile.py` takes JPEG **bytes** and
+returns a dict, so the tests post a frame with a stub landmarker and assert on the
+roster (`tests/test_multipose.py`, `tests/test_mobile.py`). JPEG encoding in the tests
+is the only reason those skip anything, and only when OpenCV is absent.
+
+---
+
 ## Raspberry Pi setup
 
 **Hardware:** Pi 5 with the official 27 W supply (weak supplies throttle and drop
@@ -640,6 +769,11 @@ Rebooting should bring the website back by itself within a minute.
 | Roasts repeat | the hand-written fallback pool is finite | add a Gemini key so roasts are written fresh; check `data/insults.txt` |
 | Roasts are silent but captions appear | audio route, or the Bluetooth link dropped | try **Voice → Local**, switch the route to cast, and confirm the Nest is paired |
 | Sleep never fires | it needs all three signals at once, for 25 s: collapsed, motionless *and* head down | watch the **Sleeping**, **Motion** and **Head down** rows on the Debug panel; if Motion stays high they are fidgeting (correct), and if Head down shows `ref --` no head reference has been measured yet |
+| Mobile: nothing happens when I tap **Start camera** | the page is not a secure origin, so the browser withholds the camera | the phone page says which case it is. Either open the `https://…:5000/m` URL `--mobile` printed and accept the certificate once, or in Chrome set `chrome://flags/#unsafely-treat-insecure-origin-as-secure` to include your `http://` origin. On `https://` with a self-signed certificate, Chrome treats the page as insecure *until* you accept the exception |
+| Mobile: roster stays empty | no pose found in the frames, or nobody is in shot | check **In view** on the phone and `detect_ms` in `/api/status`; the model needs most of the upper body visible, and a dark backlit room defeats it |
+| Mobile: laggy, or the numbers crawl | frames are too big, too frequent, or too many people | lower **Frames per second** in the phone's settings, point the phone at fewer people, and keep the upload at the default 640 px wide. The phone skips a frame rather than queueing up |
+| Mobile: I hear each roast twice | the server played it through the Nest *and* the phone spoke it | set **Audio** to `off` in Controls, or turn off **Speak roasts on this phone** |
+| Mobile: a person who leaves comes back as "Person 1" again | identity is positional, per frame | expected: the roster is a live view of the room, not a name registry. Give the phone a second after re-framing |
 | Sleep fires while awake | they were genuinely motionless and slumped for 25 s | raise **Sleep after (s)**, or lower `sleep_stillness` in `vision/detector.py` so tiny movements count as movement |
 | Under ~8 fps, laggy overlay | an oversized model | `--model lite`, smaller frames, or detect on every second frame |
 | `could not open camera 0` | another program has it, or the wrong index | `run.py --list-cameras`, then `--camera N` |
@@ -666,10 +800,10 @@ Rebooting should bring the website back by itself within a minute.
 
 | Role | Owns | Builds |
 | ---- | ---- | ------ |
-| 1. Vision | `vision/` | landmarks, side selection, angles, sit-down detection, calibration, score, hysteresis |
-| 2. Server | `server/` | Flask, camera thread, MJPEG, state machine, SQLite, SSE, systemd, fake readings |
+| 1. Vision | `vision/` | landmarks, side selection, angles, sit-down detection, calibration, score, hysteresis, multi-person/any-angle measurement |
+| 2. Server | `server/` | Flask, camera thread, MJPEG, state machine, SQLite, SSE, mobile frame intake, systemd, fake readings |
 | 3. Voice | `voice/` | Bluetooth, the roast prompt and schema, TTS, the pool, the player queue, all fallbacks |
-| 4. Website + demo lead | `web/` | the HUD, controls, settings, the chart, the pitch and the demo script |
+| 4. Website + demo lead | `web/` | the desktop HUD, the phone page, controls, settings, the chart, the pitch and the demo script |
 
 Collision rules: one folder per person, commit small and often, only one person
 deploys to the Pi at a time, and contracts change only with everyone's agreement.
@@ -677,14 +811,19 @@ deploys to the Pi at a time, and contracts change only with everyone's agreement
 **A three-minute pitch.** *Problem:* students hunch over laptops for hours and
 polite reminders are easy to ignore. *Demo:* a judge sits down, the system notices,
 calibrates, they slouch on purpose, and the Nest roasts them while the roast
-appears beside the live angle overlay. *Architecture:* side-view geometry with
-per-user calibration, a debounced state machine, and a pre-generated
-context-aware roast pool. *Next:* posture history, profiles, roast personalities.
+appears beside the live angle overlay. *Then the phone comes out:* `--mobile` turns
+any phone into the camera, and the projector shows a live roster of the room —
+"Person 2, sit up" — measured from whatever angle the phone happens to be holding.
+*Architecture:* side-view geometry with per-user calibration, a debounced state
+machine, and a pre-generated context-aware roast pool; the phone only captures,
+the server does the thinking. *Next:* posture history, profiles, roast
+personalities, and remembering who is who between sessions.
 
 Expect these questions: why a side view (it measures real neck and torso angles),
-how false alarms are avoided (calibration, smoothing, hysteresis, the `away`
-state), and what happens without a connection (the pool, the local voice, and the
-hand-written fallbacks).
+how mobile handles other angles (it detects the view and switches to head sink and
+shoulder tilt, per person), how false alarms are avoided (calibration, smoothing,
+hysteresis, the `away` state), and what happens without a connection (the pool, the
+local voice, and the hand-written fallbacks).
 
 ---
 
@@ -696,14 +835,16 @@ hand-written fallbacks).
 ├── config.py                 # paths + .env loader
 ├── vision/                   # frames -> readings
 │   ├── angles.py             #   pure geometry (no cv2/MediaPipe)
-│   ├── landmarks.py          #   MediaPipe pose wrapper
+│   ├── landmarks.py          #   MediaPipe pose wrapper (one pose, or many)
 │   ├── detector.py           #   angles, sit-down detection, score, overlay
+│   ├── multipose.py          #   view angle, per-person tracking (mobile)
 │   ├── calibrate.py          #   upright baseline capture
 │   ├── source.py             #   webcam / video-file sources
 │   └── synthetic.py          #   fake camera feed for --simulate
 ├── server/                   # Flask, threads, state machine, DB
 │   ├── app.py                #   app factory + routes
 │   ├── camera.py             #   the vision thread
+│   ├── mobile.py             #   phone frames -> tracked people
 │   ├── state_machine.py      #   the six states and the roast triggers
 │   ├── events.py             #   SSE broker
 │   ├── db.py                 #   SQLite logging + session stats
@@ -720,8 +861,9 @@ hand-written fallbacks).
 │   ├── roasts.py             #   hand-written fallbacks
 │   └── prompts/              #   roast.txt, nice.txt
 ├── web/                      # the HUD
-│   ├── index.html
-│   └── static/{app.js,style.css,fonts.css,fonts/}
+│   ├── index.html            #   the desktop page
+│   ├── mobile.html           #   the phone page
+│   └── static/{app.js,mobile.js,style.css,mobile.css,fonts.css,fonts/}
 ├── fakes/fake_readings.py    # scripted readings
 ├── tests/                    # unit tests + smoke.py
 ├── .pi/skills/               # agent skills for working on this repo

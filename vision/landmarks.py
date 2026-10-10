@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import urllib.request
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import config
 
@@ -71,6 +71,7 @@ class PoseLandmarker:
         min_detection_confidence: float = 0.5,
         min_presence_confidence: float = 0.5,
         min_tracking_confidence: float = 0.5,
+        num_poses: int = 1,
     ):
         model = (model or "lite").lower()
         if model not in MODEL_URLS:
@@ -79,6 +80,8 @@ class PoseLandmarker:
         self.model_dir = Path(model_dir or config.MODELS_DIR)
         self.model_path = self._ensure_model(model)
         self._last_ms = 0
+        #: The side-view app wants one person; the phone app wants a roomful.
+        self.num_poses = max(1, int(num_poses))
         self._landmarker = self._build(
             min_detection_confidence,
             min_presence_confidence,
@@ -103,7 +106,7 @@ class PoseLandmarker:
         options = mp.tasks.vision.PoseLandmarkerOptions(
             base_options=mp.tasks.BaseOptions(model_asset_path=str(self.model_path)),
             running_mode=mp.tasks.vision.RunningMode.VIDEO,
-            num_poses=1,
+            num_poses=self.num_poses,
             min_pose_detection_confidence=det,
             min_pose_presence_confidence=pres,
             min_tracking_confidence=track,
@@ -112,7 +115,18 @@ class PoseLandmarker:
 
     # -- inference --------------------------------------------------------
     def detect(self, frame_bgr) -> Optional[Dict[str, object]]:
-        """Return pixel-space landmarks for the visible side, or ``None``."""
+        """Return pixel-space landmarks for the person in frame, or ``None``."""
+        poses = self.detect_multi(frame_bgr)
+        return poses[0] if poses else None
+
+    def detect_multi(self, frame_bgr) -> List[Dict[str, object]]:
+        """Every person in the frame, up to ``num_poses`` (one inference call).
+
+        Each entry carries the picked side's points — what the side-view
+        :class:`~vision.detector.PostureDetector` consumes — *and* both sides and
+        the nose, because the mobile app needs the whole upper body to work out
+        which way somebody is facing before it can measure anything.
+        """
         import cv2
         import mediapipe as mp
 
@@ -123,28 +137,54 @@ class PoseLandmarker:
         self._last_ms = ms
         result = self._landmarker.detect_for_video(mp_image, ms)
 
-        if not result.pose_landmarks:
-            return None
-
-        lms = result.pose_landmarks[0]
-        side = pick_side(lms)
         height, width = frame_bgr.shape[:2]
+        poses: List[Dict[str, object]] = []
+        for lms in (result.pose_landmarks or [])[: self.num_poses]:
+            side = pick_side(lms)
 
-        def point(indices) -> Point:
-            lm = lms[indices[side]]
-            vis = getattr(lm, "visibility", None)
-            return (float(lm.x) * width, float(lm.y) * height, float(vis) if vis is not None else 1.0)
+            def point(indices, _lms=lms) -> Point:
+                lm = _lms[indices[side]]
+                vis = getattr(lm, "visibility", None)
+                return (float(lm.x) * width, float(lm.y) * height, float(vis) if vis is not None else 1.0)
 
-        # Only what the detector actually uses: ear + eye for the head tilt,
-        # shoulder/hip/knee for the neck and torso angles.
-        return {
-            "side": side,
-            "ear": point(EAR),
-            "eye": point(EYE),
-            "shoulder": point(SHOULDER),
-            "hip": point(HIP),
-            "knee": point(KNEE),
-        }
+            def one(indices, which, _lms=lms) -> Point:
+                lm = _lms[indices[which]]
+                vis = getattr(lm, "visibility", None)
+                return (float(lm.x) * width, float(lm.y) * height, float(vis) if vis is not None else 1.0)
+
+            nose = lms[NOSE]
+            nose_vis = getattr(nose, "visibility", None)
+            poses.append(
+                {
+                    "side": side,
+                    "ear": point(EAR),
+                    "eye": point(EYE),
+                    "shoulder": point(SHOULDER),
+                    "hip": point(HIP),
+                    "knee": point(KNEE),
+                    "nose": (
+                        float(nose.x) * width,
+                        float(nose.y) * height,
+                        float(nose_vis) if nose_vis is not None else 1.0,
+                    ),
+                    "left": {
+                        "ear": one(EAR, "left"),
+                        "eye": one(EYE, "left"),
+                        "shoulder": one(SHOULDER, "left"),
+                        "hip": one(HIP, "left"),
+                        "knee": one(KNEE, "left"),
+                    },
+                    "right": {
+                        "ear": one(EAR, "right"),
+                        "eye": one(EYE, "right"),
+                        "shoulder": one(SHOULDER, "right"),
+                        "hip": one(HIP, "right"),
+                        "knee": one(KNEE, "right"),
+                    },
+                    "size": (float(width), float(height)),
+                }
+            )
+        return poses
 
     def close(self) -> None:
         try:

@@ -109,17 +109,34 @@ class RoastService:
                 return None
             except queue.Full:
                 self.log("[voice] live roast queue full; using a pooled clip")
-        return self._deliver(self._take_pooled(tier), event)
+        return self._deliver(self._take_pooled(tier, event), event)
 
     def test_roast(self) -> Optional[Clip]:
         """The demo button: always immediate, so the route can report the text."""
         return self._deliver(self._take_pooled("mild"), {"event": "test_roast"})
 
-    def _take_pooled(self, tier: str) -> Clip:
+    def _context(self, event: Optional[Dict] = None) -> Dict:
+        """The prompt context, plus anything this particular roast adds.
+
+        Mobile mode sends a per-roast context (``person``, ``view``, ``metric``)
+        because the same machine is watching several people at once, and the
+        insult should be able to say who it means.
+        """
+        context: Dict = {}
+        try:
+            context = dict(self.context_provider() or {})
+        except Exception:  # noqa: BLE001
+            log.warning("context provider failed", exc_info=True)
+        extra = (event or {}).get("context") or {}
+        if isinstance(extra, dict):
+            context.update(extra)
+        return context
+
+    def _take_pooled(self, tier: str, event: Optional[Dict] = None) -> Clip:
         clip = self.pool.take(tier) or self.pool.take_any()
         if clip is not None:
             return clip
-        text = self._fallback_text(tier)
+        text = self._fallback_text(tier, event)
         mood = self._mood_tier(tier)
         path = self._synthesize(text, mood)
         return Clip(text=text, tier=mood, path=path, source="fallback", voice=self._voice_from_path(path))
@@ -164,13 +181,13 @@ class RoastService:
         items = self.writer.generate(
             count=1,
             tier=tier,
-            context=self.context_provider() or {},
+            context=self._context(event),
             nice=self._nice(),
             exclude=self._exclude_list(),
         )
         items = [item for item in items if item.get("text")]
         if not items:
-            return self._take_pooled(tier)
+            return self._take_pooled(tier, event)
         item = items[0]
         source = str(item.get("source") or "gemini")
         if source == "fallback":
@@ -228,10 +245,10 @@ class RoastService:
                 out.append(text)
         return out
 
-    def _fallback_text(self, tier: str) -> str:
+    def _fallback_text(self, tier: str, event: Optional[Dict] = None) -> str:
         exclude = self._exclude_list()
         nice = self._nice()
-        context = self.context_provider() or {}
+        context = self._context(event)
         text = fallback_one(
             tier="mild" if nice else tier,
             nice=nice,
@@ -256,7 +273,7 @@ class RoastService:
     def _text_source(self, tier: str, count: int) -> List[Dict]:
         nice = self._nice()
         exclude = self._exclude_list()
-        context = self.context_provider() or {}
+        context = self._context(None)
         items: List[Dict] = []
         if self.writer.available:
             items = self.writer.generate(

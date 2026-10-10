@@ -34,6 +34,7 @@ class VisionService(threading.Thread):
         jpeg_quality: int = 70,
         sample_interval: float = 1.0,
         publish_interval: float = 0.5,
+        mobile: bool = False,
     ):
         super().__init__(name="vision", daemon=True)
         self.state_machine = state_machine
@@ -42,7 +43,10 @@ class VisionService(threading.Thread):
         self.on_event = on_event
         self.source = source
         self.detector = detector
-        self.simulate = bool(simulate or source is None)
+        #: Mobile mode has no local capture at all: the phone's frames are pushed
+        #: in from outside, so this thread is never started.
+        self.mobile = bool(mobile)
+        self.simulate = bool(simulate or (source is None and not mobile))
         self.fake_readings = fake_readings
         self.settings = settings
 
@@ -76,6 +80,17 @@ class VisionService(threading.Thread):
     def latest_reading(self) -> Dict:
         with self._lock:
             return dict(self._reading)
+
+    def publish_external_frame(self, reading: Dict, frame, ts: float) -> None:
+        """Adopt a frame that came from somewhere else (a phone) as the shared one.
+
+        Mobile mode has no capture thread, so the phone's frames become the frame
+        the website serves on ``/video_feed`` and the readings the Debug panel
+        ticks on. The mobile page and the desktop HUD then agree about what is
+        happening in the room.
+        """
+        self._store_frame(frame, reading, ts)
+        self._maybe_publish(ts, reading)
 
     @property
     def fps(self) -> float:
@@ -302,8 +317,12 @@ class VisionService(threading.Thread):
 
     def status(self) -> Dict:
         return {
-            "mode": "simulate" if self.simulate else "camera",
-            "source": self.source.describe() if self.source is not None else "simulated",
+            "mode": "mobile" if self.mobile else ("simulate" if self.simulate else "camera"),
+            "source": (
+                "phone"
+                if self.mobile
+                else (self.source.describe() if self.source is not None else "simulated")
+            ),
             "fps": self.fps,
             "frames": self.frames,
             "errors": self.errors,

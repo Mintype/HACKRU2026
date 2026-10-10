@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Posture Coach — Mobile</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+    <meta name="theme-color" content="#07090b" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="stylesheet" href="/static/fonts.css" />
+    <link rel="stylesheet" href="/static/mobile.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- live camera + the skeleton the server tells us to draw -->
+      <video id="cam" playsinline muted autoplay></video>
+      <canvas id="overlay"></canvas>
+
+      <header id="topbar">
+        <div class="brand">
+          <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 20h16M7 20V9a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v11M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+          </svg>
+          <span>Posture Coach</span>
+        </div>
+        <div id="totals" class="totals">
+          <span class="t-good"><b id="count-good">0</b> good</span>
+          <span class="t-bad"><b id="count-bad">0</b> bad</span>
+        </div>
+        <button id="btn-menu" class="icon-btn" aria-label="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+      </header>
+
+      <!-- who is in view, worst first -->
+      <section id="roster-panel" class="glass">
+        <div class="panel-head">
+          <h2>In view <span id="roster-count" class="dim">0</span></h2>
+          <button class="chev" id="btn-collapse" aria-label="Collapse">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+        </div>
+        <ul id="roster" class="roster"></ul>
+        <p id="roster-empty" class="note">Point the camera at somebody. Give them a second to be measured.</p>
+      </section>
+
+      <!-- the last roast, big enough to read at arm's length -->
+      <section id="caption" class="glass" hidden>
+        <p id="caption-text"></p>
+        <span id="caption-who" class="who"></span>
+      </section>
+
+      <!-- why nothing is happening, in words that tell you what to do -->
+      <section id="notice" class="glass" hidden>
+        <div class="panel-head">
+          <h2 id="notice-title">Heads up</h2>
+          <button class="chev" id="btn-notice" aria-label="Dismiss">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <p id="notice-text" class="note"></p>
+      </section>
+
+      <!-- camera + connection state, always visible -->
+      <footer id="statusbar">
+        <span id="hint" class="hint">Tap start to begin</span>
+        <span id="net" class="net"></span>
+      </footer>
+
+      <button id="btn-start" class="cta">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M15 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-3.5l6 4.5V6z" />
+        </svg>
+        <span>Start camera</span>
+      </button>
+
+      <!-- settings sheet -->
+      <div id="menu" class="sheet" hidden>
+        <div class="sheet-card glass">
+          <div class="panel-head">
+            <h2>Settings</h2>
+            <button class="chev" id="btn-close" aria-label="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+          <label class="row">
+            <span>Speak roasts on this phone</span>
+            <input type="checkbox" id="opt-speak" checked />
+          </label>
+          <label class="row">
+            <span>Mirror the picture</span>
+            <input type="checkbox" id="opt-mirror" />
+          </label>
+          <label class="row">
+            <span>Draw the skeleton</span>
+            <input type="checkbox" id="opt-skeleton" checked />
+          </label>
+          <label class="row">
+            <span>Frames per second</span>
+            <input type="range" id="opt-fps" min="2" max="12" step="1" value="7" />
+          </label>
+          <label class="row">
+            <span>Camera</span>
+            <select id="opt-facing">
+              <option value="environment">Back (point at people)</option>
+              <option value="user">Front (point at yourself)</option>
+            </select>
+          </label>
+          <button id="btn-test-roast" class="btn">Test roast</button>
+          <p class="note" id="menu-note"></p>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/mobile.js"></script>
+  </body>
+</html>

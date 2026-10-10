@@ -196,6 +196,15 @@ def _context_lines(context: Dict) -> List[str]:
             "- IMPORTANT: they have nodded off - slumped, motionless, head down. "
             "The line must be about falling asleep at the desk and must tell them to wake up."
         )
+    if context.get("person"):
+        # Mobile mode watches several people at once, so the insult has to be
+        # aimed: the phone speaks it aloud in a room with other people in it.
+        lines.append(
+            f"- You are talking about {context['person']} in a shared room. "
+            "Address them by that name so everyone knows who it is for."
+        )
+    if context.get("metric"):
+        lines.append(f"- What the camera measures on them right now: {context['metric']}.")
     if context.get("worst_torso_angle"):
         lines.append(f"- Worst torso angle so far: {context['worst_torso_angle']} degrees from vertical.")
     if context.get("neck_drift") is not None and context.get("torso_drift") is not None:

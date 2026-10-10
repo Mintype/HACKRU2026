@@ -22,10 +22,15 @@ from voice.service import RoastService
 from .camera import VisionService
 from .db import Database
 from .events import EventBroker
+from .mobile import MobileVision
 from .settings import AUDIO_ROUTES, MODELS, Settings
 from .state_machine import PostureStateMachine
 
 log = logging.getLogger(__name__)
+
+#: Mobile mode calibrates each person quickly: a phone gets pointed at somebody
+#: for a second or two, not at a fixed desk for five.
+MOBILE_CALIBRATION_SECONDS = 2.0
 
 
 class Coach:
@@ -45,12 +50,18 @@ class Coach:
         settings_path: Optional[str] = None,
         settings_overrides: Optional[Dict[str, object]] = None,
         fake_readings=None,
+        mobile: bool = False,
+        mobile_max_people: Optional[int] = None,
+        mobile_landmarker=None,
     ):
         config.ensure_dirs()
         self.host = host
         self.port = port
         self.no_audio = no_audio
         self.requested_simulate = bool(simulate)
+        #: Mobile mode: the camera is a phone in a browser (see server/mobile.py).
+        self.mobile_mode = bool(mobile)
+        self.mobile: Optional[MobileVision] = None
 
         self.settings = Settings(path=settings_path, overrides=settings_overrides)
         if model:
@@ -69,6 +80,10 @@ class Coach:
         self.source = None
         self.simulate = bool(simulate)
         self.camera_index: Optional[int] = None
+        self.mobile_max_people = max(
+            1,
+            int(mobile_max_people or self.settings.get("mobile_max_people") or 3),
+        )
 
         if video is not None:
             source_spec: Optional[str | int] = video
@@ -83,7 +98,24 @@ class Coach:
             source_spec = self.camera_index
         self.source_spec = source_spec
 
-        if source_spec is not None:
+        # Mobile mode still needs the pose model, but it runs on frames posted by
+        # phones rather than on a local camera, so it is built by hand here and
+        # asked for several people at once.
+        self.mobile_landmarker = mobile_landmarker
+        if self.mobile_mode and self.mobile_landmarker is None:
+            try:
+                from vision.landmarks import PoseLandmarker
+
+                self.mobile_landmarker = PoseLandmarker(
+                    model=self.settings.get("model"),
+                    num_poses=self.mobile_max_people,
+                )
+                log.info("mobile mode: pose model ready for up to %d people", self.mobile_max_people)
+            except Exception as exc:  # noqa: BLE001
+                log.error("mobile pose setup failed (%s); the roster will stay empty", exc)
+                self.mobile_landmarker = None
+
+        if source_spec is not None and not self.mobile_mode:
             try:
                 from vision.detector import PostureDetector
                 from vision.landmarks import PoseLandmarker
@@ -128,17 +160,58 @@ class Coach:
             settings=self.settings,
             fake_readings=fake_readings,
             on_event=self._on_vision_event,
+            mobile=self.mobile_mode,
         )
+
+        # -- mobile (the phone is the camera) -----------------------------
+        if self.mobile_mode:
+            self.mobile = MobileVision(
+                landmarker=self.mobile_landmarker,
+                machine_factory=self.mobile_machine,
+                max_people=self.mobile_max_people,
+                on_roast=self._on_mobile_roast,
+                publish=self.vision.publish_external_frame,
+                calibration_seconds=MOBILE_CALIBRATION_SECONDS,
+            )
+
+    # -- mobile helpers ---------------------------------------------------
+    def mobile_machine(self) -> PostureStateMachine:
+        """A state machine per tracked person, with mobile-appropriate settings.
+
+        It is the same machine the Pi app uses, so hysteresis, roast timing and
+        the cooldown behave identically and only the two things that are wrong
+        for a room full of people are changed: calibration is quick (a phone is
+        pointed at someone for a second or two, not at a fixed desk) and sleep is
+        off, because people walk around instead of sitting still.
+        """
+        cfg = self.settings.machine_config()
+        cfg.calibration_seconds = MOBILE_CALIBRATION_SECONDS
+        cfg.sleep_threshold_seconds = 0.0
+        return PostureStateMachine(cfg)
+
+    def _on_mobile_roast(self, event: Dict) -> None:
+        """A tracked person earned a roast; let the voice layer handle it.
+
+        The event carries a per-person context, so the insult can name them, and
+        the text reaches the phone through the broker when it is played (or
+        decided, if the local audio route is off - the phone speaks it either
+        way).
+        """
+        try:
+            self.roast_service.on_roast_due(event)
+        except Exception:  # noqa: BLE001
+            log.warning("could not dispatch a mobile roast", exc_info=True)
 
     # -- lifecycle --------------------------------------------------------
     def start(self) -> None:
         self.roast_service.start()
-        self.vision.start()
+        if not self.mobile_mode:
+            self.vision.start()
         log.info(
             "Posture Coach ready on http://%s:%s (mode=%s, audio=%s)",
             self.host,
             self.port,
-            "simulate" if self.simulate else "camera",
+            "mobile" if self.mobile_mode else ("simulate" if self.simulate else "camera"),
             self.player.route,
         )
 
@@ -202,6 +275,10 @@ class Coach:
                 "slouch_count": (event or {}).get("slouch_count"),
                 "neck_angle": (event or {}).get("worst_neck_angle"),
                 "state": self.state_machine.state,
+                # Mobile mode: which tracked person the insult is about, so the
+                # phone can name them and highlight the right roster row.
+                "person": (event or {}).get("person"),
+                "person_context": (event or {}).get("context"),
             }
         )
 
@@ -219,6 +296,9 @@ def create_app(
     settings_path: Optional[str] = None,
     settings_overrides: Optional[Dict[str, object]] = None,
     fake_readings=None,
+    mobile: bool = False,
+    mobile_max_people: Optional[int] = None,
+    mobile_landmarker=None,
 ) -> Flask:
     config.ensure_dirs()
     app = Flask(
@@ -241,6 +321,9 @@ def create_app(
         settings_path=settings_path,
         settings_overrides=settings_overrides,
         fake_readings=fake_readings,
+        mobile=mobile,
+        mobile_max_people=mobile_max_people,
+        mobile_landmarker=mobile_landmarker,
     )
     app.coach = coach  # type: ignore[attr-defined]
 
@@ -248,6 +331,28 @@ def create_app(
     @app.get("/")
     def index():
         return render_template("index.html")
+
+    # ------------------------------------------------------------------ mobile
+    # The phone page: camera in the browser, frames posted here, roster back.
+    @app.get("/m")
+    def mobile_page():
+        return render_template("mobile.html")
+
+    @app.post("/m/frame")
+    def mobile_frame():
+        if coach.mobile is None:
+            return jsonify({"ok": False, "error": "start the server with --mobile"}), 409
+        device = (request.args.get("device") or "phone").strip()[:40] or "phone"
+        payload = request.get_data(cache=False, as_text=False)
+        if not payload:
+            return jsonify({"ok": False, "error": "empty frame"}), 400
+        return jsonify(coach.mobile.handle_frame(payload, time.time(), device))
+
+    @app.get("/m/state")
+    def mobile_state():
+        if coach.mobile is None:
+            return jsonify({"ok": False, "error": "start the server with --mobile"}), 409
+        return jsonify(coach.mobile.state())
 
     @app.get("/healthz")
     def healthz():
@@ -353,7 +458,9 @@ def create_app(
                     "simulate": coach.simulate,
                     "camera_index": coach.camera_index,
                     "subscribers": coach.broker.subscriber_count,
+                    "mobile": coach.mobile_mode,
                 },
+                "mobile": coach.mobile.status() if coach.mobile is not None else None,
                 "db": {"path": str(coach.db.path)},
             }
         )

@@ -11,13 +11,14 @@ machine decides when a slouch deserves an insult; a pre-generated (or live-gener
 Gemini/ElevenLabs roast plays on a Nest while Flask serves a fullscreen browser HUD.
 
 **Start here, then load the area skill:** `posture-coach-vision`, `posture-coach-voice`,
-`posture-coach-hud`.
+`posture-coach-hud`, `posture-coach-mobile` (the phone-as-camera mode).
 
 ## Run and test
 
 ```bash
 python run.py                  # real webcam; auto-relaunches into .venv
 python run.py --simulate       # scripted readings + synthetic stick-figure feed, no camera
+python run.py --mobile         # phone-as-camera: no local camera, phones post frames to /m
 python run.py --demo           # short thresholds (roast 10s) so the cycle is visible fast
 python run.py --preview        # standalone OpenCV window, no browser (good for aiming the camera)
 python run.py --list-cameras   # probe camera indices (Windows: DirectShow)
@@ -28,6 +29,10 @@ python -m unittest discover -s tests -t .   # the whole suite, no hardware, no n
 python -m tests.smoke                        # boots the real Flask app via the test client
 ```
 
+The suite is **offline by policy**: `tests/__init__.py` blanks the API keys, because a
+test that loaded `.env` once leaked the real ones and made the voice tests spend 38 s
+on live API retries. Pass a key explicitly if a test needs one.
+
 `run.py` re-execs itself inside `.venv` when the deps are missing, so a bare
 `python run.py` works even if PATH points at another interpreter.
 
@@ -35,10 +40,10 @@ python -m tests.smoke                        # boots the real Flask app via the 
 
 | Path | Owns |
 | ---- | ---- |
-| `vision/` | frames → readings: `angles.py` (pure math), `landmarks.py` (MediaPipe), `detector.py`, `calibrate.py`, `source.py`, `synthetic.py` |
-| `server/` | `app.py` (Flask + composition), `camera.py` (vision thread), `state_machine.py`, `events.py` (SSE), `db.py` (SQLite), `settings.py` |
+| `vision/` | frames → readings: `angles.py` (pure math), `landmarks.py` (MediaPipe), `detector.py`, `multipose.py` (mobile: view angle + multi-person tracking), `calibrate.py`, `source.py`, `synthetic.py` |
+| `server/` | `app.py` (Flask + composition), `camera.py` (vision thread), `mobile.py` (phone frames → tracked people), `state_machine.py`, `events.py` (SSE), `db.py` (SQLite), `settings.py` |
 | `voice/` | `gemini_text.py` (writes roasts), `eleven_tts.py` (speaks them), `tts_local.py`, `pool.py`, `player.py`, `service.py`, `insults.py`, `prompts/`, `roasts.py` |
-| `web/` | `index.html`, `static/{app.js,style.css,fonts.css,fonts/}` |
+| `web/` | `index.html` + `static/{app.js,style.css,fonts.css,fonts/}` (desktop HUD), `mobile.html` + `static/mobile.{js,css}` (phone page) |
 | `fakes/` | `fake_readings.py` — scripted readings used by `--simulate` and the tests |
 | `tests/` | unit tests + `smoke.py` |
 | `data/` | runtime, git-ignored: `posture.db`, `insults.txt`, `roasts/*.wav`, `settings.json` |

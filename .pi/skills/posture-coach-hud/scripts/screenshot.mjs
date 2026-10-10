@@ -7,8 +7,17 @@
  * screenshot flag hangs forever. This drives the browser explicitly instead.
  *
  * Usage:
- *   node screenshot.mjs [url] [out.png] [delayMs] [width] [height]
+ *   node screenshot.mjs [url] [out.png] [delayMs] [width] [height] [options]
  *   node screenshot.mjs http://127.0.0.1:5000/ hud.png 25000 1600 900
+ *   node screenshot.mjs http://127.0.0.1:5000/m phone.png 3000 390 844 --mobile
+ *   node screenshot.mjs ... --eval "__pc.handleFrame({...})"   # render a state first
+ *   node screenshot.mjs ... --fake-camera --eval "__pc.startCamera()"
+ *
+ * Options:
+ *   --mobile        emulate a phone viewport (device pixel ratio 2, touch, no hover)
+ *   --fake-camera   give the page a synthetic camera + auto-accepted permission, so
+ *                   getUserMedia really runs (use with --eval "__pc.startCamera()")
+ *   --eval <js>     run JS in the page just before capturing, e.g. to inject state
  *
  * Env:
  *   CHROME=/path/to/chrome   override browser discovery
@@ -20,13 +29,24 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+const argv = process.argv.slice(2);
+const options = { mobile: false, fakeCamera: false, eval: null };
+const positional = [];
+for (let i = 0; i < argv.length; i++) {
+  const arg = argv[i];
+  if (arg === "--mobile") options.mobile = true;
+  else if (arg === "--fake-camera") options.fakeCamera = true;
+  else if (arg === "--eval") options.eval = argv[++i];
+  else positional.push(arg);
+}
+
 const [
   url = "http://127.0.0.1:5000/",
   out = "hud.png",
   delayMs = "9000",
   width = "1600",
   height = "900",
-] = process.argv.slice(2);
+] = positional;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -79,21 +99,25 @@ async function main() {
 
   if (!reusePort) {
     profile = mkdtempSync(join(tmpdir(), "hud-shot-"));
-    child = spawn(
-      findBrowser(),
-      [
-        "--headless=new",
-        "--disable-gpu",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-extensions",
-        `--remote-debugging-port=${port}`,
-        `--user-data-dir=${profile}`,
-        `--window-size=${width},${height}`,
-        "about:blank",
-      ],
-      { stdio: "ignore" }
-    );
+    const browserArgs = [
+      "--headless=new",
+      "--disable-gpu",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-extensions",
+      // Mobile mode serves HTTPS with a throw-away certificate, so the phone
+      // (and this) has to accept a self-signed one.
+      "--ignore-certificate-errors",
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${profile}`,
+      `--window-size=${width},${height}`,
+    ];
+    if (options.fakeCamera) {
+      // A synthetic camera feed, and no permission prompt to click.
+      browserArgs.push("--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream");
+    }
+    browserArgs.push("about:blank");
+    child = spawn(findBrowser(), browserArgs, { stdio: "ignore" });
   }
 
   const ws = new WebSocket(await pageTarget(port));
@@ -117,14 +141,32 @@ async function main() {
 
   try {
     await send("Page.enable");
+    await send("Runtime.enable");
     await send("Emulation.setDeviceMetricsOverride", {
       width: Number(width),
       height: Number(height),
-      deviceScaleFactor: 1,
-      mobile: false,
+      deviceScaleFactor: options.mobile ? 2 : 1,
+      mobile: options.mobile,
     });
+    if (options.mobile) {
+      await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+    }
     await send("Page.navigate", { url });
     await sleep(Number(delayMs));
+    if (options.eval) {
+      const result = await send("Runtime.evaluate", {
+        expression: options.eval,
+        awaitPromise: true,
+        returnByValue: true,
+      });
+      const value = result && result.result ? result.result.value : undefined;
+      if (result && result.exceptionDetails) {
+        console.error(`--eval threw: ${JSON.stringify(result.exceptionDetails.text || result.exceptionDetails)}`);
+      } else if (value !== undefined) {
+        console.log(`--eval -> ${JSON.stringify(value).slice(0, 200)}`);
+      }
+      await sleep(600); // let the injected state paint before the shot
+    }
     const { data } = await send("Page.captureScreenshot", { format: "png" });
     writeFileSync(out, Buffer.from(data, "base64"));
     console.log(`wrote ${out} (${width}x${height}, waited ${delayMs}ms)`);
