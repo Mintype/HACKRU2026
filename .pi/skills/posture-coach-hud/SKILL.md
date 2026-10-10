@@ -86,7 +86,21 @@ print('panels html :', sorted(re.findall(r'data-panel=\"([^\"]+)\"', h)))
 
 ## Diagnostics on the page
 
-The System panel is the debugging surface: **Detection** (`person · seated`, the usual
-reason roasts never fire), camera/backend, fps, Nest connection, per-provider voice
-status, **Voice mix** (amber when the pool is mixed) and **Roast source** (live/pool
-plus any pending live roast and API cooldown). If a roast is silent, start there.
+Two panels carry the debugging surface, and both must stay wired:
+
+- **System** — Detection (`person · seated`, the usual reason roasts never fire),
+  camera/backend, fps, Nest connection, per-provider voice status, **Voice mix**
+  (amber when the pool is mixed), **Roast source** (live/pool, pending live roasts,
+  API cooldown) and insults used.
+- **Debug** — the raw internals, live: state, detection, score (smoothed + raw),
+  neck/torso with drift, failing part, slouch timer, the roast countdown with its
+  trigger or blocker, cooldown, calibration progress, the thresholds and timers in
+  use, camera stats, session id and the last state-machine event. Its rows use
+  `.kv.compact` so the panel stays short enough not to collide with the chart.
+
+The Debug panel is fed by SSE readings (~2/s) for the fast values and by
+`/api/stats` + `/api/status` every 5 s for the rest, so adding a field means
+adding the id in `index.html` and a `setField("dbg-…")` call in `updateDebugLive`
+or `updateDebugStats`. If a countdown never starts, the machine is not seeing a
+slouch; if it is stuck behind `cooldown`, the roast is gated, not broken. If a
+roast is silent, start elsewhere — the timer is working.

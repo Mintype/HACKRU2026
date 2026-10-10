@@ -252,6 +252,7 @@ class VisionService(threading.Thread):
         if self.broker is None or (ts - self._last_publish) < self.publish_interval:
             return
         self._last_publish = ts
+        snapshot = self.state_machine.snapshot(ts)
         self.broker.publish(
             {
                 "kind": "reading",
@@ -261,11 +262,19 @@ class VisionService(threading.Thread):
                 "neck_angle": reading.get("neck_angle"),
                 "torso_angle": reading.get("torso_angle"),
                 "score": reading.get("score"),
+                "raw_score": reading.get("raw_score"),
+                "neck_drift": reading.get("neck_drift"),
+                "torso_drift": reading.get("torso_drift"),
+                "slouch_part": reading.get("slouch_part"),
+                "thigh_angle": reading.get("thigh_angle"),
                 "state": reading.get("state"),
                 "fps": self.fps,
                 "calibrated": reading.get("calibrated"),
-                # lets the website show the roast countdown ticking
-                "next_roast": self.state_machine.time_to_roast(),
+                # everything the web page's Debug panel needs to tick live
+                "slouch_seconds": snapshot.get("slouch_seconds"),
+                "cooldown_remaining": snapshot.get("cooldown_remaining"),
+                "calibration_progress": snapshot.get("calibration_progress"),
+                "next_roast": snapshot.get("next_roast"),
             }
         )
 

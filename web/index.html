@@ -246,6 +246,39 @@
     </div>
   </section>
 
+  <section class="panel" data-panel="debug">
+    <header class="panel-head">
+      <h2>Debug</h2>
+      <div class="panel-actions">
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    </header>
+    <div class="panel-body">
+      <ul class="kv compact">
+        <li><span>State</span><b id="dbg-state">&mdash;</b></li>
+        <li><span>Detection</span><b id="dbg-detect">&mdash;</b></li>
+        <li><span>Score</span><b id="dbg-score">&mdash;</b></li>
+        <li><span>Neck</span><b id="dbg-neck">&mdash;</b></li>
+        <li><span>Torso</span><b id="dbg-torso">&mdash;</b></li>
+        <li><span>Failing part</span><b id="dbg-part">&mdash;</b></li>
+        <li><span>Slouched</span><b id="dbg-slouch">&mdash;</b></li>
+        <li><span>Next roast</span><b id="dbg-next">&mdash;</b></li>
+        <li><span>Cooldown</span><b id="dbg-cooldown">&mdash;</b></li>
+        <li><span>Calibration</span><b id="dbg-calib">&mdash;</b></li>
+        <li><span>Thresholds</span><b id="dbg-thresholds">&mdash;</b></li>
+        <li><span>Timers</span><b id="dbg-timers">&mdash;</b></li>
+        <li><span>Camera</span><b id="dbg-camera">&mdash;</b></li>
+        <li><span>Session</span><b id="dbg-session">&mdash;</b></li>
+        <li><span>Last event</span><b id="dbg-event">&mdash;</b></li>
+      </ul>
+    </div>
+  </section>
+
 </div>
 
 <script src="{{ url_for('static', filename='app.js') }}"></script>

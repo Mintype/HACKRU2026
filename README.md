@@ -482,10 +482,39 @@ it as translucent panels. Data arrives over SSE, so nothing needs refreshing.
 | **Score** | the score over the session, with roast markers (resizable). |
 | **Controls** | calibrate, test roast, nice mode, and every setting in the tables above. |
 | **System** | the debugging surface: **Detection** (`person · seated` — the usual reason nothing fires), camera and backend, fps, Nest connection, audio route, the voice engine and its voice, the pool's voice mix, insults used, and the roast source with any API cooldown. |
+| **Debug** | the raw internals, live: state, detection, score (smoothed and raw), neck and torso with their drift, which part is failing, the slouch timer, **the roast countdown with its trigger or what is blocking it**, cooldown, calibration progress, the thresholds and timers in use, camera stats, session id and the last state-machine event. Hide it from **Panels** when you do not want it. |
 
 Panels can be dragged by their title bar, collapsed, hidden and re-added from the
 **Panels** menu; the layout is remembered in the browser. The header buttons are
 *Panels* (**P**), *Mirror* (**M**) and *Fullscreen* (**F**).
+
+### Debugging on the page
+
+The **Debug** panel is the in-app answer to "why has it not roasted yet":
+
+```
+State          roasted
+Detection      person · seated
+Score          0.00   raw 0.00
+Neck           41.8°   +29.8°
+Torso          18.1°   +14.1°
+Failing part   neck
+Slouched       8.7s
+Next roast     8.2s   cooldown      <- the countdown, and what is holding it
+Cooldown       8.2s
+Thresholds     slouch<0.70  good>0.80  ±20°
+Timers         roast 10s  cool 10s  bad<0.45 3s
+Camera         camera:1 (dshow)  9.7fps  210f  0err
+Session        id 1  4.2min  2 slouches  1 roasts
+Last event     roast_due · bad_posture · roasted
+```
+
+Read it like this: a countdown that **never starts** means the machine is not
+seeing a slouch (look at Detection and the score); a countdown stuck behind
+**cooldown** means it is working and rate-limited; and a countdown reaching zero
+with no audio means the problem is the voice or the audio route, not the timer.
+The same countdown is on the Posture panel, and `run.py --timers` prints it in a
+terminal.
 
 ---
 

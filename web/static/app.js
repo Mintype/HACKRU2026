@@ -11,7 +11,7 @@
   const TOPBAR = 44;
   const GAP = 12;
   const EDGE = 12;
-  const STORE_KEY = "posturecoach.hud.v4";
+  const STORE_KEY = "posturecoach.hud.v5";
 
   /* ------------------------------------------------------------ registry */
   // column + anchor say where auto-arrange parks a panel; order stacks them in
@@ -22,6 +22,7 @@
     stats:    { title: "Session",       width: 300, column: "right", anchor: "top",    order: 0 },
     system:   { title: "System",        width: 300, column: "right", anchor: "top",    order: 1 },
     controls: { title: "Controls",      width: 320, column: "right", anchor: "bottom", order: 0 },
+    debug:    { title: "Debug",         width: 320, column: "left",  anchor: "top",    order: 1 },
   };
 
   const STATE_CLASS = {
@@ -120,9 +121,22 @@
       el.style.width = p.w + "px";
       if (PANELS[id].resizable) el.style.height = (p.h || PANELS[id].height || 200) + "px";
 
-      const height = el.offsetHeight || 160;
+      let height = el.offsetHeight || 160;
       const column = single ? "left" : PANELS[id].column;
       const anchor = single ? "top" : (PANELS[id].anchor || "top");
+      if (anchor === "bottom" && PANELS[id].resizable) {
+        // A tall column must not push a resizable panel up into the panels
+        // already stacked above it: shrink it, down to its minimum, to fit.
+        const available = Math.max(
+          PANELS[id].minH || 120,
+          cursor[column].bottom - cursor[column].top
+        );
+        if (height > available) {
+          p.h = Math.round(available);
+          el.style.height = p.h + "px";
+          height = el.offsetHeight || available;
+        }
+      }
       const x = column === "left" ? EDGE : Math.max(EDGE, vw - p.w - EDGE);
       const y = anchor === "top" ? cursor[column].top : cursor[column].bottom - height;
 
@@ -523,6 +537,7 @@
   /* ------------------------------------------------------------- updates */
   let sessionStartedAt = null;
   let currentState = "away";
+  let currentStatus = null;
   let mirrorOn = false;
   let captionTimer = null;
 
@@ -552,6 +567,7 @@
     }
     if (reading.state) applyState(reading.state);
     if (reading.next_roast) updateTimer(reading.next_roast);
+    updateDebugLive(reading);
 
     // Why a roast may never fire: nobody detected, or detected but not seated.
     if (reading.person !== undefined) {
@@ -591,6 +607,98 @@
     captionTimer = setTimeout(() => caption.classList.remove("show"), 9000);
   }
 
+  /* ------------------------------------------------------------ debug panel */
+  // Everything the state machine is thinking, so "why has it not roasted yet"
+  // is answerable without a terminal. Fed by SSE readings (~2/s) for the fast
+  // values and by /api/stats + /api/status for the slow ones.
+  const num = (value, digits = 1) =>
+    value === null || value === undefined || Number.isNaN(Number(value))
+      ? "\u2014"
+      : Number(value).toFixed(digits);
+
+  function setField(id, text, kind = "") {
+    const el = $(id);
+    if (el) {
+      el.textContent = text;
+      el.className = kind;
+    }
+  }
+
+  function updateDebugLive(reading) {
+    if (!reading) return;
+    if (reading.state) setField("dbg-state", reading.state);
+    if (reading.person !== undefined) {
+      const person = reading.person === true;
+      const seated = reading.seated === true;
+      setField(
+        "dbg-detect",
+        person ? (seated ? "person \u00b7 seated" : "person \u00b7 not seated") : "nobody",
+        person && seated ? "ok" : person ? "warn" : "none"
+      );
+    }
+    if (reading.score !== undefined) {
+      setField("dbg-score", `${num(reading.score, 2)}   raw ${num(reading.raw_score, 2)}`);
+    }
+    if (reading.neck_angle !== undefined) {
+      setField("dbg-neck", `${num(reading.neck_angle, 1)}\u00b0   +${num(reading.neck_drift, 1)}\u00b0`);
+    }
+    if (reading.torso_angle !== undefined) {
+      setField("dbg-torso", `${num(reading.torso_angle, 1)}\u00b0   +${num(reading.torso_drift, 1)}\u00b0`);
+    }
+    if (reading.slouch_part !== undefined) setField("dbg-part", reading.slouch_part || "\u2014");
+    if (reading.slouch_seconds !== undefined) setField("dbg-slouch", `${num(reading.slouch_seconds, 1)}s`);
+    if (reading.cooldown_remaining !== undefined) {
+      setField("dbg-cooldown", `${num(reading.cooldown_remaining, 1)}s`);
+    }
+    if (reading.calibration_progress !== undefined) {
+      setField(
+        "dbg-calib",
+        reading.state === "calibrating" ? `${Math.round((reading.calibration_progress || 0) * 100)}%` : "\u2014"
+      );
+    }
+    if (reading.next_roast) {
+      const next = reading.next_roast;
+      const waiting = next.seconds === null || next.seconds === undefined;
+      setField(
+        "dbg-next",
+        waiting ? "not slouching" : `${num(next.seconds, 1)}s   ${next.blocked_by || next.trigger || "?"}`,
+        !waiting && next.seconds <= 3 ? "warn" : ""
+      );
+    }
+  }
+
+  function updateDebugStats(stats, status) {
+    if (stats) {
+      const live = stats.live || {};
+      const settings = stats.settings || {};
+      setField(
+        "dbg-thresholds",
+        `slouch<${num(settings.lower_threshold, 2)}  good>${num(settings.upper_threshold, 2)}  \u00b1${num(settings.delta_angle, 0)}\u00b0`
+      );
+      setField(
+        "dbg-timers",
+        `roast ${num(settings.roast_seconds, 0)}s  cool ${num(settings.cooldown_seconds, 0)}s  bad<${num(settings.bad_score_threshold, 2)} ${num(settings.bad_score_seconds, 0)}s`
+      );
+      setField(
+        "dbg-session",
+        `id ${stats.session_id ?? "\u2014"}  ${num(live.session_minutes, 1)}min  ${live.slouch_count ?? 0} slouches  ${stats.roasts ?? 0} roasts`
+      );
+      updateDebugLive({
+        state: stats.state || live.state,
+        slouch_seconds: live.slouch_seconds,
+        cooldown_remaining: live.cooldown_remaining,
+        next_roast: live.next_roast,
+      });
+    }
+    if (status && status.vision) {
+      const vision = status.vision;
+      setField(
+        "dbg-camera",
+        `${vision.source || vision.mode || "?"}  ${num(vision.fps, 1)}fps  ${vision.frames ?? 0}f  ${vision.errors ?? 0}err`
+      );
+    }
+  }
+
   function updateStats(stats) {
     if (!stats) return;
     const live = stats.live || {};
@@ -607,6 +715,7 @@
 
     if (live.next_roast) updateTimer(live.next_roast);
     $("calib-bar").style.width = Math.round((live.calibration_progress || 0) * 100) + "%";
+    updateDebugStats(stats, currentStatus);
   }
 
   function setState(el, text, kind) {
@@ -682,6 +791,13 @@
         requestChart();
       } else if (data.kind === "event") {
         if (data.state) applyState(data.state);
+        if (data.event && data.event !== "state") {
+          setField(
+            "dbg-event",
+            `${data.event}${data.reason ? " \u00b7 " + data.reason : ""}${data.state ? " \u00b7 " + data.state : ""}`,
+            data.event === "roast_due" ? "warn" : ""
+          );
+        }
         if (data.event === "session_start") {
           series.length = 0;
           markers.length = 0;
@@ -721,7 +837,9 @@
 
   async function fetchStatus() {
     try {
-      updateStatus(await fetchJSON("/api/status"));
+      currentStatus = await fetchJSON("/api/status");
+      updateStatus(currentStatus);
+      updateDebugStats(null, currentStatus);
     } catch (e) {
       /* ignore */
     }

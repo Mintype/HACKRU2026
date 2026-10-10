@@ -345,7 +345,12 @@ body.is-fullscreen .icon-exit { display: block; }
   font-size: 11px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
+/* The Debug panel has many short rows; denser, so its column cannot run into
+   the chart below it. */
+.kv.compact li { padding: 3px 0; }
+.kv.compact b { font-size: 10.5px; }
 .ok   { color: var(--good); }
 .warn { color: var(--warn); }
 .none { color: var(--faint); }
