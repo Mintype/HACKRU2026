@@ -617,14 +617,12 @@
     setState($("sys-bt"), btOn ? "connected" : btSet ? "disconnected" : "not set", btOn ? "ok" : btSet ? "warn" : "none");
     $("sys-route").textContent = audio.route || "\u2014";
     setState($("sys-gemini"), voice.gemini_text ? "live" : "offline fallback", voice.gemini_text ? "ok" : "warn");
-    const ttsReady = voice.gemini_tts_ready !== false;
     setState(
-      $("sys-tts"),
-      voice.gemini_tts ? (ttsReady ? "live" : "quota hold") : "local fallback",
-      voice.gemini_tts && ttsReady ? "ok" : "warn"
+      $("sys-eleven"),
+      voice.elevenlabs ? `ElevenLabs \u00b7 ${voice.elevenlabs_voice || "?"}` : "local (no key)",
+      voice.elevenlabs ? "ok" : "none"
     );
     setState($("sys-local"), voice.local_tts || "none", voice.local_tts ? "ok" : "none");
-    setState($("sys-eleven"), voice.elevenlabs ? "live" : "no key", voice.elevenlabs ? "ok" : "none");
 
     // A pool voiced by more than one engine sounds inconsistent, so say so.
     const voices = (voice.pool && voice.pool.voices) || {};

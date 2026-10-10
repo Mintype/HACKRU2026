@@ -195,17 +195,17 @@ def test_voice_command(text: str) -> int:
     """Voice one line using the configured provider order, then play it."""
     from server.settings import Settings
     from voice.eleven_tts import ElevenLabsTTS
-    from voice.gemini_tts import GeminiTTS
     from voice.tts_local import LocalTTS
 
-    settings = Settings()
-    mode = str(settings.get("tts_mode") or "auto").lower()
-    eleven, gemini, local = ElevenLabsTTS(), GeminiTTS(), LocalTTS()
+    mode = str(Settings().get("tts_mode") or "auto").lower()
+    eleven, local = ElevenLabsTTS(), LocalTTS()
     out = config.ROAST_DIR / "voice-test.wav"
 
     print(f"  voice mode   : {mode}")
-    print(f"  ElevenLabs   : {'key found' if eleven.available else 'no ELEVENLABS_API_KEY'}")
-    print(f"  Gemini       : {'key found' if gemini.available else 'no GEMINI_API_KEY'}")
+    if eleven.available:
+        print(f"  ElevenLabs   : key found (voice {eleven.voice_name})")
+    else:
+        print("  ElevenLabs   : no ELEVENLABS_API_KEY")
     print(f"  local engine : {local.engine or 'none'}")
     print(f"  line         : {text!r}\n")
 
@@ -213,30 +213,20 @@ def test_voice_command(text: str) -> int:
     attempts = []
     if mode in {"auto", "elevenlabs"}:
         attempts.append(("ElevenLabs", lambda: eleven.synthesize(text, out, "medium")))
-    if mode in {"auto", "gemini"}:
-        attempts.append(("Gemini", lambda: gemini.synthesize(text, out, "medium")))
     if mode in {"auto", "local"}:
         attempts.append(("local", lambda: local.synthesize(text, out)))
 
     for name, run in attempts:
         if run():
-            engine = {
-                "ElevenLabs": eleven.voice_used or eleven.voice_id,
-                "Gemini": gemini.model_used or gemini.model,
-                "local": local.engine,
-            }.get(name, name)
+            engine = eleven.voice_name if name == "ElevenLabs" else local.engine
             print(f"  spoke with   : {name} ({engine})")
             print(f"  wrote        : {out}  ({out.stat().st_size} bytes)")
             _play(out)
             return 0
-        detail = ""
-        if name == "ElevenLabs":
-            detail = eleven.last_error or ""
-        elif name == "Gemini":
-            detail = gemini.last_error or ""
+        detail = eleven.last_error if name == "ElevenLabs" else ""
         print(f"  {name:11s} failed" + (f": {str(detail)[:160]}" if detail else ""))
 
-    print("  nothing could synthesize audio: add a key or install espeak-ng/piper")
+    print("  nothing could synthesize audio: add ELEVENLABS_API_KEY or install espeak-ng/piper")
     return 1
 
 

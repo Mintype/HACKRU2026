@@ -21,7 +21,6 @@ from typing import Callable, Deque, Dict, List, Optional
 import config
 from .eleven_tts import ElevenLabsTTS
 from .gemini_text import RoastWriter
-from .gemini_tts import GeminiTTS
 from .insults import InsultLog
 from .player import AudioPlayer
 from .pool import Clip, RoastPool
@@ -37,7 +36,6 @@ class RoastService:
         *,
         player: AudioPlayer,
         writer: Optional[RoastWriter] = None,
-        tts: Optional[GeminiTTS] = None,
         eleven: Optional[ElevenLabsTTS] = None,
         local_tts: Optional[LocalTTS] = None,
         settings=None,
@@ -48,7 +46,6 @@ class RoastService:
     ):
         self.player = player
         self.writer = writer if writer is not None else RoastWriter()
-        self.tts = tts if tts is not None else GeminiTTS()
         self.eleven = eleven if eleven is not None else ElevenLabsTTS()
         self.local_tts = local_tts if local_tts is not None else LocalTTS()
         self.settings = settings
@@ -276,11 +273,11 @@ class RoastService:
         return items[:count]
 
     def _tts_mode(self) -> str:
-        """auto = best voice available, else local; or force one for consistency."""
+        """auto = ElevenLabs when it can, else local; or force one for consistency."""
         if self.settings is None:
             return "auto"
         mode = str(self.settings.get("tts_mode") or "auto").lower()
-        return mode if mode in {"auto", "elevenlabs", "gemini", "local"} else "auto"
+        return mode if mode in {"auto", "elevenlabs", "local"} else "auto"
 
     @staticmethod
     def _voice_from_path(path: Optional[str]) -> Optional[str]:
@@ -288,7 +285,7 @@ class RoastService:
             return None
         name = str(path)
         if name.endswith("_gemini.wav"):
-            return "gemini"
+            return "gemini"  # clips left over from when Gemini TTS was wired in
         if name.endswith("_local.wav"):
             return "local"
         if name.endswith("_elevenlabs.wav"):
@@ -311,14 +308,10 @@ class RoastService:
             if path.exists() and path.stat().st_size > 0:
                 return str(path)
             if voice == "elevenlabs":
-                if mode in {"local", "gemini"} or not self.eleven.available:
+                if mode == "local" or not self.eleven.available:
                     return None
                 return str(path) if self.eleven.synthesize(text, path, tier) else None
-            if voice == "gemini":
-                if mode in {"local", "elevenlabs"} or not self.tts.ready:
-                    return None
-                return str(path) if self.tts.synthesize(text, path, tier) else None
-            if mode in {"gemini", "elevenlabs"} or not self.local_tts.available:
+            if mode == "elevenlabs" or not self.local_tts.available:
                 return None
             return str(path) if self.local_tts.synthesize(text, path) else None
 
@@ -326,10 +319,8 @@ class RoastService:
             return attempt("local")
         if mode == "elevenlabs":
             return attempt("elevenlabs")
-        if mode == "gemini":
-            return attempt("gemini")
-        # auto: best voice available, then the others, then offline
-        return attempt("elevenlabs") or attempt("gemini") or attempt("local")
+        # auto: ElevenLabs when a key is present, otherwise the offline voice
+        return attempt("elevenlabs") or attempt("local")
 
     # -- status -----------------------------------------------------------
     def status(self) -> Dict:
@@ -338,10 +329,8 @@ class RoastService:
         return {
             "gemini_text": self.writer.available,
             "gemini_text_error": self.writer.last_error,
-            "gemini_tts": self.tts.available,
-            "gemini_tts_ready": getattr(self.tts, "ready", self.tts.available),
-            "gemini_tts_error": self.tts.last_error,
             "elevenlabs": self.eleven.available,
+            "elevenlabs_voice": self.eleven.voice_name,
             "elevenlabs_error": self.eleven.last_error,
             "local_tts": self.local_tts.engine,
             "tts_mode": self._tts_mode(),

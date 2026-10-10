@@ -20,15 +20,6 @@ def offline_writer():
     return writer
 
 
-def offline_tts():
-    """A GeminiTTS that cannot reach the network."""
-    from voice.gemini_tts import GeminiTTS
-
-    tts = GeminiTTS()
-    tts.api_key = ""
-    return tts
-
-
 def offline_eleven():
     """An ElevenLabsTTS that cannot reach the network."""
     from voice.eleven_tts import ElevenLabsTTS
@@ -42,7 +33,6 @@ def offline_service(**kwargs):
     from voice.service import RoastService
 
     kwargs.setdefault("writer", offline_writer())
-    kwargs.setdefault("tts", offline_tts())
     kwargs.setdefault("eleven", offline_eleven())
     return RoastService(**kwargs)
 
@@ -223,58 +213,6 @@ class TestRoastPersonalisation(unittest.TestCase):
                 self.assertNotIn("{n}", item["text"])
 
 
-class TestGeminiTTSModelChain(unittest.TestCase):
-    """Free-tier quota is per model, and model names change, so the voice must
-    walk the chain instead of dying on the first unavailable model."""
-
-    def test_helpers(self):
-        from voice.gemini_tts import is_quota_error, quota_backoff_seconds
-
-        self.assertTrue(is_quota_error("429 RESOURCE_EXHAUSTED"))
-        self.assertFalse(is_quota_error("connection reset by peer"))
-        self.assertAlmostEqual(quota_backoff_seconds("'retryDelay': '14287s'"), 14287.0, delta=1)
-        self.assertAlmostEqual(quota_backoff_seconds("retry in 3h58m7s"), 3 * 3600 + 58 * 60, delta=1)
-
-    def test_an_exhausted_model_falls_through_to_the_next(self):
-        from voice.gemini_tts import GeminiTTS
-
-        tts = GeminiTTS(api_key="fake-key", model="exhausted-model")
-        tried = []
-
-        def fake_call(text, style, model=None):
-            tried.append(model)
-            if model == "exhausted-model":
-                raise RuntimeError("429 RESOURCE_EXHAUSTED ... 'retryDelay': '14287s'")
-            return b"\x00\x00" * 10, 24000, 1
-
-        tts._call = fake_call
-        with tempfile.TemporaryDirectory() as tmp:
-            out = pathlib.Path(tmp) / "line.wav"
-            with self.assertLogs("voice.gemini_tts", level="WARNING"):
-                self.assertTrue(tts.synthesize("Sit up.", out, "mild"))
-        self.assertEqual(tried[0], "exhausted-model")
-        self.assertNotEqual(tried[1], "exhausted-model")
-        self.assertEqual(tts.model_used, tried[1])
-        self.assertTrue(tts._cooling_down("exhausted-model"))
-        self.assertTrue(tts.ready)  # another model in the chain still works
-
-    def test_every_model_failing_reports_not_ready(self):
-        from voice.gemini_tts import GeminiTTS
-
-        tts = GeminiTTS(api_key="fake-key")
-
-        def always_429(text, style, model=None):
-            raise RuntimeError("429 RESOURCE_EXHAUSTED")
-
-        tts._call = always_429
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertLogs("voice.gemini_tts", level="WARNING"):
-                self.assertFalse(tts.synthesize("Sit up.", pathlib.Path(tmp) / "x.wav", "mild"))
-        self.assertFalse(tts.ready)
-        self.assertGreater(tts.backoff_remaining, 0)
-        self.assertTrue(tts.last_error)
-
-
 class TestVoiceMode(unittest.TestCase):
     """A pool must be able to use a single voice, on purpose."""
 
@@ -295,17 +233,6 @@ class TestVoiceMode(unittest.TestCase):
         def play_clip(self, clip):
             return True
 
-    class _TTS:
-        available = True
-        last_error = None
-
-        def __init__(self, ready=True):
-            self.ready = ready
-
-        def synthesize(self, text, path, tier=None):
-            pathlib.Path(path).write_bytes(b"RIFF....")
-            return True
-
     class _Local:
         available = True
         engine = "fake"
@@ -314,43 +241,40 @@ class TestVoiceMode(unittest.TestCase):
             pathlib.Path(path).write_bytes(b"RIFF....")
             return True
 
-    def _service(self, mode, gemini_ready=True):
+    def _service(self, mode):
         return offline_service(
             player=self._Player(),
-            tts=self._TTS(gemini_ready),
             local_tts=self._Local(),
             settings=self._Settings(mode),
             context_provider=lambda: {},
             pool_size=2,
         )
 
-    def _voice(self, mode, gemini_ready=True):
+    def _voice(self, mode):
         with tempfile.TemporaryDirectory() as tmp:
             original = config.ROAST_DIR
             config.ROAST_DIR = pathlib.Path(tmp)
             try:
-                return self._service(mode, gemini_ready)._synthesize("Sit up.")
+                return self._service(mode)._synthesize("Sit up.")
             finally:
                 config.ROAST_DIR = original
 
     def test_local_mode_uses_only_the_local_engine(self):
         self.assertTrue(self._voice("local").endswith("_local.wav"))
 
-    def test_gemini_mode_uses_gemini_when_ready(self):
-        self.assertTrue(self._voice("gemini").endswith("_gemini.wav"))
+    def test_auto_uses_local_without_an_elevenlabs_key(self):
+        self.assertTrue(self._voice("auto").endswith("_local.wav"))
 
-    def test_gemini_mode_stays_silent_rather_than_mixing(self):
-        self.assertIsNone(self._voice("gemini", gemini_ready=False))
-
-    def test_auto_falls_back_to_local(self):
-        self.assertTrue(self._voice("auto", gemini_ready=False).endswith("_local.wav"))
+    def test_an_unknown_mode_falls_back_to_auto(self):
+        self.assertTrue(self._voice("nonsense").endswith("_local.wav"))
 
     def test_voice_is_recovered_from_the_filename(self):
         from voice.service import RoastService
 
         self.assertEqual(RoastService._voice_from_path("/x/roast_ab_elevenlabs.wav"), "elevenlabs")
-        self.assertEqual(RoastService._voice_from_path("/x/roast_ab_gemini.wav"), "gemini")
         self.assertEqual(RoastService._voice_from_path("/x/roast_ab_local.wav"), "local")
+        # left over from when Gemini TTS was wired in
+        self.assertEqual(RoastService._voice_from_path("/x/roast_ab_gemini.wav"), "gemini")
         self.assertEqual(RoastService._voice_from_path("/x/roast_ab.wav"), "unknown")
         self.assertIsNone(RoastService._voice_from_path(None))
 
@@ -533,31 +457,8 @@ class TestOriginality(unittest.TestCase):
             self.assertEqual(service._exclude_list()[0], "second thing said")
 
 
-class TestVoiceMood(unittest.TestCase):
-    """The Gemini voice should carry the mood of the tier."""
-
-    def test_voice_prompt_defines_moods_and_they_differ(self):
-        from voice.gemini_tts import GeminiTTS, load_voice_prompt
-
-        base, moods = load_voice_prompt()
-        self.assertTrue(base)
-        for mood in ("mild", "medium", "spicy", "nice"):
-            self.assertIn(mood, moods)
-        tts = GeminiTTS(api_key="fake")
-        self.assertNotEqual(tts.style_for("mild"), tts.style_for("spicy"))
-        self.assertIn(moods["mild"], tts.style_for("mild"))
-        self.assertIn(base, tts.style_for("spicy"))
-
-    def test_unknown_tier_uses_the_default_mood(self):
-        from voice.gemini_tts import GeminiTTS
-
-        tts = GeminiTTS(api_key="fake")
-        self.assertEqual(tts.style_for(None), tts.style_for("medium"))
-        self.assertEqual(tts.style_for("nonsense"), tts.style_for("medium"))
-
-
 class TestProviderOrder(unittest.TestCase):
-    """auto should prefer ElevenLabs, then Gemini, then the local engine."""
+    """auto is ElevenLabs -> local, and nothing else."""
 
     class _Settings:
         def __init__(self, mode):
@@ -584,11 +485,10 @@ class TestProviderOrder(unittest.TestCase):
             pathlib.Path(path).write_bytes(b"RIFF....")
             return True
 
-    def _service(self, mode, eleven=True, gemini=True, local=True):
+    def _service(self, mode, eleven=True, local=True):
         return offline_service(
             player=self._Player(),
             eleven=self._Voice(eleven),
-            tts=self._Voice(gemini),
             local_tts=self._Voice(local),
             settings=self._Settings(mode),
             context_provider=lambda: {},
@@ -608,20 +508,19 @@ class TestProviderOrder(unittest.TestCase):
     def test_auto_prefers_elevenlabs(self):
         self.assertTrue(self._voice_for("auto").endswith("_elevenlabs.wav"))
 
-    def test_auto_uses_gemini_without_an_elevenlabs_key(self):
-        self.assertTrue(self._voice_for("auto", eleven=False).endswith("_gemini.wav"))
-
-    def test_auto_falls_back_to_local_when_no_cloud_voice_works(self):
-        self.assertTrue(self._voice_for("auto", eleven=False, gemini=False).endswith("_local.wav"))
-
-    def test_forced_elevenlabs_does_not_mix_in_gemini(self):
-        self.assertTrue(self._voice_for("elevenlabs").endswith("_elevenlabs.wav"))
+    def test_auto_falls_back_to_local_without_a_key(self):
+        self.assertTrue(self._voice_for("auto", eleven=False).endswith("_local.wav"))
 
     def test_forced_elevenlabs_is_silent_without_a_key(self):
         self.assertIsNone(self._voice_for("elevenlabs", eleven=False))
 
-    def test_forced_gemini_does_not_use_elevenlabs(self):
-        self.assertTrue(self._voice_for("gemini").endswith("_gemini.wav"))
+    def test_forced_local_never_uses_elevenlabs(self):
+        self.assertTrue(self._voice_for("local").endswith("_local.wav"))
+
+    def test_gemini_is_no_longer_part_of_the_voice_path(self):
+        path = self._voice_for("gemini")
+        self.assertIsNotNone(path)
+        self.assertFalse(path.endswith("_gemini.wav"))
 
 
 class TestElevenLabs(unittest.TestCase):

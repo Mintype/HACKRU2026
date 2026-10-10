@@ -119,7 +119,7 @@ python run.py --simulate --no-audio
 │   ├── prompts/              #   editable prompt text: roast.txt, nice.txt
 │   ├── gemini_text.py        #   structured roast batches
 │   ├── eleven_tts.py         #   ElevenLabs voice (preferred)
-│   ├── gemini_tts.py         #   text -> PCM -> WAV
+│   ├── tts_local.py          #   offline voice
 │   ├── tts_local.py          #   espeak-ng / piper / say / SAPI fallback
 │   ├── wavutil.py            #   WAV writing, lead silence, normalise
 │   ├── pool.py               #   pre-generated clip pool
@@ -206,14 +206,17 @@ the first that answers:
 | Order | Engine | Notes |
 | ----- | ------ | ----- |
 | 1 | **ElevenLabs** (`ELEVENLABS_API_KEY`) | Preferred: its free tier is ~10k characters/month, which suits these one-liners far better than a per-day request cap. Mood comes from `voice_settings` — lower stability and more style for a repeat offender. |
-| 2 | **Gemini TTS** (`GEMINI_API_KEY`) | Free tier is ~10 requests/day **per model**, so it walks a chain of TTS models (`voice/gemini_tts.py`) instead of dying on one. |
-| 3 | **Local** | espeak-ng / piper / macOS `say` / Windows SAPI — unlimited and works offline. |
+| 2 | **Local** | espeak-ng / piper / macOS `say` / Windows SAPI — unlimited and works offline. |
 
-`elevenlabs`, `gemini` or `local` force a single engine, so the voice stays
-consistent (a forced engine goes quiet rather than mixing in another voice when
-it has no key). Voiced clips are cached per engine — `roast_<hash>_elevenlabs.wav`
-— so switching engine re-voices new lines and leaves old ones alone; clear
-`data/roasts/` to re-voice everything.
+Gemini is used **only for writing** the roasts, never for speaking them.
+
+`elevenlabs` or `local` force a single engine, so the voice stays consistent (a
+forced engine goes quiet rather than mixing in another voice when it has no key).
+Voiced clips are cached per engine — `roast_<hash>_elevenlabs.wav` — so switching
+engine re-voices new lines and leaves old ones alone; clear `data/roasts/` to
+re-voice everything. The default voice is **Sarah**; free plans cannot use
+"library" voices through the API, so a rejected voice makes the client list the
+account's own voices and use one of those.
 
 ### Roast prompts
 
@@ -231,11 +234,10 @@ than `str.format`, so the JSON example braces in the templates stay literal.
 If a file is missing or empty the built-in defaults are used, so a deleted file
 can never break the app. Hand-written fallbacks live in `voice/roasts.py`.
 
-The **delivery** for the spoken voice is a third file,
-`voice/prompts/voice.txt`: a shared base plus `[mood mild|medium|spicy|nice]`
-sections. The tier of an insult picks the mood, so a repeat offender does not
-sound like a first slip. It is re-read on each clip, so it can be tuned while
-the app runs.
+The **delivery** for the spoken voice is not a prompt any more: ElevenLabs takes
+`voice_settings`, so the tier of an insult maps to numbers in
+`voice/eleven_tts.py` (`TIER_SETTINGS`) — stability falls and style rises, so a
+repeat offender does not sound like a first slip.
 
 ### Never repeat
 
@@ -367,9 +369,9 @@ Copy `.env.example` to `.env` and fill it in. `.env` is git-ignored.
 | -------- | ------- |
 | `GEMINI_API_KEY` | from Google AI Studio; without it the app uses fallbacks |
 | `GEMINI_TEXT_MODEL` | text model id (check Google's models page on the day) |
-| `GEMINI_TTS_MODEL` / `GEMINI_TTS_VOICE` | TTS model and voice persona |
-| `ELEVENLABS_API_KEY` | preferred voice; without it `auto` uses Gemini then local |
-| `ELEVENLABS_VOICE_ID` | voice to use (default Rachel, `21m00Tcm4TlvDq8ikWAM`) |
+| `GEMINI_TEXT_MODEL` | text model used to write roasts (Gemini never speaks) |
+| `ELEVENLABS_API_KEY` | the voice; without it `auto` uses the local engine |
+| `ELEVENLABS_VOICE_ID` | voice to use (default Sarah, `EXAVITQu4vr4xnSDxMaL`) |
 | `ELEVENLABS_MODEL` | defaults to `eleven_flash_v2_5` |
 | `NEST_BLUETOOTH_MAC` | from `bluetoothctl devices` |
 | `NEST_CAST_NAME` | friendly name for the Wi-Fi cast backup |
@@ -579,7 +581,7 @@ effect on the chart.
 | ---- | ---- | ------ |
 | 1. Vision | `vision/` | landmarks, side selection, angles, sit-down detection, calibration, score, hysteresis |
 | 2. Server | `server/` | Flask app, camera thread, MJPEG, state machine, SQLite, SSE, systemd, fake readings |
-| 3. Voice | `voice/` | Bluetooth to the Nest, Gemini prompt + schema, Gemini TTS, roast pool, player queue, all fallbacks |
+| 3. Voice | `voice/` | Bluetooth to the Nest, Gemini prompt + schema for *writing* roasts, ElevenLabs voice, roast pool, player queue, all fallbacks |
 | 4. Website + demo lead | `web/` | website, controls, settings, live chart, captions, pitch, demo script, backup video |
 
 Rules that keep four people from colliding:

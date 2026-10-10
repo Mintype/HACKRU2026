@@ -37,7 +37,7 @@ python -m tests.smoke                        # boots the real Flask app via the 
 | ---- | ---- |
 | `vision/` | frames → readings: `angles.py` (pure math), `landmarks.py` (MediaPipe), `detector.py`, `calibrate.py`, `source.py`, `synthetic.py` |
 | `server/` | `app.py` (Flask + composition), `camera.py` (vision thread), `state_machine.py`, `events.py` (SSE), `db.py` (SQLite), `settings.py` |
-| `voice/` | `gemini_text.py`, `gemini_tts.py`, `eleven_tts.py`, `tts_local.py`, `pool.py`, `player.py`, `service.py`, `insults.py`, `prompts/`, `roasts.py` |
+| `voice/` | `gemini_text.py` (writes roasts), `eleven_tts.py` (speaks them), `tts_local.py`, `pool.py`, `player.py`, `service.py`, `insults.py`, `prompts/`, `roasts.py` |
 | `web/` | `index.html`, `static/{app.js,style.css,fonts.css,fonts/}` |
 | `fakes/` | `fake_readings.py` — scripted readings used by `--simulate` and the tests |
 | `tests/` | unit tests + `smoke.py` |

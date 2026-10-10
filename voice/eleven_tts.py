@@ -38,6 +38,31 @@ API_ROOT = "https://api.elevenlabs.io/v1"
 #: "Sarah - Mature, Reassuring, Confident" — a *premade* voice, so it works on a
 #: free plan. (Library voices such as Rachel need a paid subscription.)
 DEFAULT_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
+
+#: Friendly names for the premade voices, for logs and the System panel.
+VOICE_NAMES: Dict[str, str] = {
+    "CwhRBWXzGAHq8TQ4Fs17": "Roger",
+    "EXAVITQu4vr4xnSDxMaL": "Sarah",
+    "FGY2WhTYpPnrIDTdsKH5": "Laura",
+    "IKne3meq5aSn9XLyUdCD": "Charlie",
+    "JBFqnCBsd6RMkjVDRZzb": "George",
+    "N2lVS1w4EtoT3dr4eOWO": "Callum",
+    "SAz9YHcvj6GT2YYXdXww": "River",
+    "SOYHLrjzK2X1ezoPC6cr": "Harry",
+    "TX3LPaxmHKxFdv7VOQHJ": "Liam",
+    "Xb7hH8MSUJpSbSDYk0k2": "Alice",
+    "XrExE9yKIg1WjnnlVkGX": "Matilda",
+    "bIHbv24MWmeRgasZH58o": "Will",
+    "cgSgspJ2msm6clMCkdW9": "Jessica",
+    "cjVYg5qzO86Huf0OWal": "Eric",
+    "hpp4J3VqNfWAUOO0d1Us": "Bella",
+    "iP95p4xoKVk53GoZ742B": "Chris",
+    "nPczCjzI2devNBz1zQrb": "Brian",
+    "onwK4e9ZLuTAKqWW03F9": "Daniel",
+    "pFZP5JQG7iQjIQuC4Bku": "Lily",
+    "pNInz6obpgDQGcFmaJgB": "Adam",
+    "pqHfZKP75CvOlQylNhV4": "Bill",
+}
 #: Flash is the fast, cheap model; a good fit for one-liners on a free plan.
 DEFAULT_MODEL = "eleven_flash_v2_5"
 DEFAULT_OUTPUT_FORMAT = "pcm_24000"
@@ -91,6 +116,12 @@ class ElevenLabsTTS:
 
     def settings_for(self, tier: Optional[str] = None) -> Dict[str, float]:
         return dict(TIER_SETTINGS.get(str(tier or "").lower(), DEFAULT_TIER_SETTINGS))
+
+    @property
+    def voice_name(self) -> str:
+        """Friendly label for logs and the UI (falls back to the raw id)."""
+        current = self.voice_used or self.voice_id
+        return VOICE_NAMES.get(current, current)
 
     def _sample_rate(self) -> int:
         if self.output_format.startswith("pcm_"):

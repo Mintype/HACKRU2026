@@ -14,39 +14,36 @@ Read `posture-coach` first for layout and contracts.
 | ---- | ---------------- |
 | `voice/prompts/roast.txt` | normal mode: actually insulting, still PG |
 | `voice/prompts/nice.txt` | nice mode: encouragement |
-| `voice/prompts/voice.txt` | spoken delivery: a shared base plus `[mood mild\|medium\|spicy\|nice]` sections |
 
 Templates use `{{TOKEN}}` placeholders (`{{CONTEXT}}`, `{{EXCLUDE}}`, `{{COUNT}}`,
 `{{TIER}}`, `{{TIER_BRIEF}}`) substituted with plain `str.replace` — **not**
-`str.format`, because the templates contain literal JSON braces. Every file has a
-built-in fallback (a missing file must never break the app), and `voice.txt` is
-re-read per clip, so the persona can be tuned while running.
+`str.format`, because the templates contain literal JSON braces. Each file has a
+built-in fallback, so a missing file can never break the app.
+
+The spoken **mood** is not a text prompt any more: ElevenLabs takes
+`voice_settings`, so the tier maps to numbers in `voice/eleven_tts.py:
+TIER_SETTINGS` (stability falls and style rises as the roast escalates).
 
 ## Providers and quota reality
 
-`tts_mode` (Controls → Voice) is `auto | elevenlabs | gemini | local`. `auto` walks:
+**Gemini writes the roasts; ElevenLabs speaks them.** `tts_mode` (Controls →
+Voice) is `auto | elevenlabs | local`, and `auto` is simply:
 
 1. **ElevenLabs** (`ELEVENLABS_API_KEY`) — free tier is **characters per month**,
-   which suits these one-liners far better than a per-day request cap. Mood maps to
-   `voice_settings`: stability falls and style rises as the tier escalates.
-2. **Gemini** (`GEMINI_API_KEY`) — free tier is **~10 requests/day per model**. The
-   quota is per *model*, so `voice/gemini_tts.py` walks a chain of TTS models and
-   cools down each one that returns 429. This is why a pinned, exhausted model in
-   `.env` used to make every clip fall back to the local voice.
-3. **Local** — `espeak-ng` / `piper` / macOS `say` / Windows SAPI: unlimited, offline.
+   which suits these one-liners far better than a per-day request cap.
+2. **Local** — `espeak-ng` / `piper` / macOS `say` / Windows SAPI: unlimited, offline.
 
 Forcing an engine stays **silent** rather than mixing in another voice when it is
-unavailable. Diagnose with:
+unavailable. Two ElevenLabs quirks that are handled for you: free plans cannot use
+"library" voices through the API (HTTP 402 — the client then lists the account's
+own voices and uses one), and some models reject the optional `style` setting (a
+422 retries without it). The default voice is **Sarah**. Diagnose with:
 
 ```bash
 python run.py --test-voice "Sit up. Your spine has filed a complaint."
-python run.py --test-voice "..." --mood spicy
-python .pi/skills/posture-coach-voice/scripts/probe_tts.py        # per provider/model status
+python .pi/skills/posture-coach-voice/scripts/probe_tts.py        # config, spends nothing
+python .pi/skills/posture-coach-voice/scripts/probe_tts.py --live # one real request
 ```
-
-`probe_tts.py` calls each provider **directly**, bypassing the fallback chain — the
-chain makes `synthesize()` succeed if *any* model works, which hides which one is
-actually dead.
 
 ## Never repeat, stay original
 
