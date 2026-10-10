@@ -109,7 +109,16 @@ class RoastService:
     def _fallback_text(self, tier: str) -> str:
         with self._lock:
             exclude = list(self._recent)
-        return fallback_one(tier=tier if not self._nice() else "mild", nice=self._nice(), exclude=exclude)
+        nice = self._nice()
+        text = fallback_one(tier="mild" if nice else tier, nice=nice, exclude=exclude)
+        return self._personalise_text(text)
+
+    def _personalise_text(self, text: str) -> str:
+        """Fill the ``{n}`` slouch counter used by some fallback lines."""
+        count = (self.context_provider() or {}).get("slouch_count")
+        if not count:
+            return text
+        return text.replace("{n}", str(count))
 
     def _text_source(self, tier: str, count: int) -> List[Dict]:
         nice = self._nice()
@@ -132,6 +141,8 @@ class RoastService:
                 nice=nice,
                 exclude=exclude + [i["text"] for i in items],
             )
+        for item in items[:count]:
+            item["text"] = self._personalise_text(item["text"])
         return items[:count]
 
     def _synthesize(self, text: str) -> Optional[str]:

@@ -1,7 +1,15 @@
-"""Gemini text generation for roast batches (structured JSON output).
+"""Gemini text generation for roast / encouragement batches (structured JSON).
 
-The prompt is built as a pure function so it can be unit-tested and reviewed.
-Every response is validated (length, tone blocklist, duplicates) before use.
+The prompt wording lives in editable text files rather than in this module:
+
+    voice/prompts/roast.txt   normal mode — actually insulting, still PG
+    voice/prompts/nice.txt    nice mode — genuine encouragement
+
+Both are templates with ``{{TOKEN}}`` placeholders (``{{CONTEXT}}``,
+``{{EXCLUDE}}``, ``{{COUNT}}``, ``{{TIER}}``, ``{{TIER_BRIEF}}``).  Plain
+``str.replace`` is used rather than ``str.format`` so the JSON example braces in
+the templates stay literal.  If a file is missing or empty the built-in
+constants below are used, so the app can never break on a deleted file.
 """
 
 from __future__ import annotations
@@ -9,13 +17,65 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
 from .roasts import fallback_batch
 
 log = logging.getLogger(__name__)
 
-MAX_WORDS = 18
+#: Drop generated lines longer than this (kept just above the 6-12 the prompt asks for).
+MAX_WORDS = 14
+
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+PROMPT_FILES = {False: "roast.txt", True: "nice.txt"}
+
+# Fallbacks, kept deliberately close to the files above.
+DEFAULT_ROAST_PROMPT = """\
+You write one-line insults for a webcam that watches how someone sits. When they
+slouch, a speaker in the room says your line out loud, in front of other people.
+
+Be genuinely funny and actually roast them. A polite reminder is a failure.
+
+HARD RULES
+- Attack the slouch, never the person: no appearance, body shape, weight, age,
+  gender, race, identity, intelligence or ability. Ever.
+- PG. No profanity, no slurs.
+- SHORT: 6-12 words. One breath. No emoji, no quotation marks.
+- Never explain the joke.
+
+TIER FOR THIS BATCH
+{{TIER}} — {{TIER_BRIEF}}
+
+SESSION CONTEXT (use only if it makes the line funnier)
+{{CONTEXT}}
+
+ALREADY USED — do not reuse or paraphrase
+{{EXCLUDE}}
+
+OUTPUT
+Return exactly {{COUNT}} lines, JSON only:
+{"roasts":[{"text":"...","tier":"{{TIER}}"}]}
+"""
+
+DEFAULT_NICE_PROMPT = """\
+You write one-line encouragement for a webcam that watches how someone sits.
+When they sit up well, a speaker in the room says your line out loud.
+
+Warm, specific, and a little bit funny. No filler like "great job".
+Never comment on appearance, body, identity or ability. PG. Kind.
+SHORT: 5-12 words. No emoji, no quotation marks.
+
+SESSION CONTEXT (optional colour)
+{{CONTEXT}}
+
+ALREADY USED — do not reuse or paraphrase
+{{EXCLUDE}}
+
+OUTPUT
+Return exactly {{COUNT}} lines, JSON only:
+{"roasts":[{"text":"...","tier":"nice"}]}
+"""
 
 BLOCKLIST = {
     "fat",
@@ -41,11 +101,34 @@ BLOCKLIST = {
 }
 
 TIER_BRIEF = {
-    "mild": "Tier: MILD. Gentle teasing, first slouches of the session.",
-    "medium": "Tier: MEDIUM. Playfully dramatic, the person keeps doing it.",
-    "spicy": "Tier: SPICY but still PG. Theatrical despair, repeat offender energy.",
-    "nice": "Encouragement, not insults. Warm and genuinely motivating.",
+    "mild": "MILD — light teasing; they have only just sat down badly.",
+    "medium": "MEDIUM — sharper and more theatrical; they keep doing it.",
+    "spicy": "SPICY — repeat offender; commit fully, still PG.",
+    "nice": "Encouragement, not insults. Warm, specific, never condescending.",
 }
+
+
+def load_prompt_template(nice: bool = False) -> str:
+    """Read the prompt template for the mode, falling back to the built-in text."""
+    path = PROMPTS_DIR / PROMPT_FILES[bool(nice)]
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+        if text:
+            return text
+    except OSError:
+        log.debug("prompt file %s missing; using built-in prompt", path)
+    return DEFAULT_NICE_PROMPT if nice else DEFAULT_ROAST_PROMPT
+
+
+def _context_lines(context: Dict) -> List[str]:
+    lines: List[str] = []
+    if context.get("slouch_count") is not None:
+        lines.append(f"- This is slouch number {context['slouch_count']} this session.")
+    if context.get("session_minutes") is not None:
+        lines.append(f"- The session has been running about {context['session_minutes']} minutes.")
+    if context.get("worst_neck_angle") is not None:
+        lines.append(f"- Worst forward-head angle so far: {context['worst_neck_angle']} degrees from vertical.")
+    return lines
 
 
 def build_prompt(
@@ -56,40 +139,21 @@ def build_prompt(
     context: Optional[Dict] = None,
     exclude: Sequence[str] = (),
 ) -> str:
+    """Render the prompt template for this batch."""
     context = context or {}
-    lines = [
-        'You write one-liners for "Posture Coach", a webcam that watches how '
-        "someone sits and speaks to them out loud when they slouch.",
-        "",
-        "Hard rules:",
-        "- Roast the slouch and the posture only.",
-        "- NEVER mention appearance, body shape, weight, age, gender, race, "
-        "identity, intelligence or ability.",
-        "- PG, office-safe, playful. No profanity, no slurs, no cruelty.",
-        f"- At most {MAX_WORDS} words each, speakable in one breath.",
-        "- Vary the imagery. Do not reuse phrasing between lines.",
-        f"- {TIER_BRIEF.get('nice' if nice else tier, TIER_BRIEF['mild'])}",
-    ]
-    if context:
-        lines.append("")
-        lines.append("Session context to weave in naturally:")
-        if context.get("slouch_count") is not None:
-            lines.append(f"- This is slouch number {context['slouch_count']} this session.")
-        if context.get("session_minutes") is not None:
-            lines.append(f"- The session has been running ~{context['session_minutes']} minutes.")
-        if context.get("worst_neck_angle") is not None:
-            lines.append(f"- Their worst forward-head angle so far is {context['worst_neck_angle']} degrees from vertical.")
-    if exclude:
-        lines.append("")
-        lines.append("Do not reuse or closely paraphrase these recent lines:")
-        for line in list(exclude)[:8]:
-            lines.append(f"- {line}")
-    lines += [
-        "",
-        f"Return exactly {count} lines.",
-        'Respond with JSON only: {"roasts": [{"text": "...", "tier": "' + ("nice" if nice else tier) + '"}]}',
-    ]
-    return "\n".join(lines)
+    template = load_prompt_template(nice)
+    tier_key = "nice" if nice else tier
+
+    context_text = "\n".join(_context_lines(context)) or "- First slouch; no session history yet."
+    exclude_text = "\n".join(f"- {line}" for line in list(exclude)[:8]) or "- (nothing yet)"
+
+    return (
+        template.replace("{{COUNT}}", str(int(count)))
+        .replace("{{TIER}}", tier_key)
+        .replace("{{TIER_BRIEF}}", TIER_BRIEF.get(tier_key, TIER_BRIEF["mild"]))
+        .replace("{{CONTEXT}}", context_text)
+        .replace("{{EXCLUDE}}", exclude_text)
+    )
 
 
 def _strip_code_fences(text: str) -> str:
@@ -109,14 +173,12 @@ def parse_roasts(raw: str, *, tier: str = "mild") -> List[Dict[str, str]]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        # Last-ditch: pull quoted strings out of a JSON-ish blob.
         import re
 
         found = re.findall(r'"text"\s*:\s*"([^"]+)"', text)
         return [{"text": item, "tier": tier} for item in found]
-    items: Iterable
     if isinstance(data, dict):
-        items = data.get("roasts") or data.get("lines") or []
+        items: Iterable = data.get("roasts") or data.get("lines") or []
     elif isinstance(data, list):
         items = data
     else:
@@ -186,7 +248,7 @@ class RoastWriter:
         nice: bool = False,
         exclude: Sequence[str] = (),
     ) -> List[Dict[str, str]]:
-        """Return validated roasts, or hand-written fallbacks on any failure."""
+        """Return validated lines, or hand-written fallbacks on any failure."""
         prompt = build_prompt(count=count, tier=tier, nice=nice, context=context, exclude=exclude)
         items: List[Dict[str, str]] = []
         if self.available:
@@ -210,7 +272,7 @@ class RoastWriter:
         from google.genai import types
 
         client = self._get_client()
-        config_kwargs: Dict = {"response_mime_type": "application/json", "temperature": 1.0}
+        config_kwargs: Dict = {"response_mime_type": "application/json", "temperature": 1.1}
         schema = None
         try:
             schema = types.Schema(

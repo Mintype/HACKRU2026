@@ -116,6 +116,7 @@ python run.py --simulate --no-audio
 │   ├── db.py                 #   SQLite logging + session stats
 │   └── settings.py           #   persisted, live-editable settings
 ├── voice/                    # ROLE 3 — Gemini roasts, pool, audio
+│   ├── prompts/              #   editable prompt text: roast.txt, nice.txt
 │   ├── gemini_text.py        #   structured roast batches
 │   ├── gemini_tts.py         #   text -> PCM -> WAV
 │   ├── tts_local.py          #   espeak-ng / piper / say / SAPI fallback
@@ -176,6 +177,23 @@ Thresholds use hysteresis: enter slouching below **0.7**, return to good above
 - slouching for ~30 s → `roast_due`
 - after a roast, a ~90 s cooldown blocks audio — but tracking continues
 - `away` (no person / not seated) is never roasted
+
+### Roast prompts
+
+The wording sent to Gemini lives in two editable text files, not in the code:
+
+| File | Mode |
+| ---- | ---- |
+| `voice/prompts/roast.txt` | normal — actually insulting, still PG |
+| `voice/prompts/nice.txt` | nice mode — genuine encouragement |
+
+Both are templates with `{{TOKEN}}` placeholders (`{{CONTEXT}}`, `{{EXCLUDE}}`,
+`{{COUNT}}`, `{{TIER}}`, `{{TIER_BRIEF}}`) filled in by
+`voice/gemini_text.py:build_prompt`. Plain string replacement is used rather
+than `str.format`, so the JSON example braces in the templates stay literal.
+If a file is missing or empty the built-in defaults are used, so a deleted file
+can never break the app. Hand-written fallbacks live in `voice/roasts.py`, and
+`{n}` in a fallback line is replaced with the session's slouch count.
 
 ### Audio routes
 
@@ -254,11 +272,13 @@ Content is pushed over server-sent events, so nothing here needs a refresh.
 
 ### Styling
 
-Flat and instrument-like on purpose: hairline borders, 2 px corners, no blur, no
-shadows, no pill shapes. The chrome (labels, numbers, controls) is set in
-**Overpass Mono** and prose (roast captions, hall of shame) in **Overpass** —
-both self-hosted as woff2 in `web/static/fonts/`, so the page renders correctly
-with no internet. Icons are [Heroicons](https://heroicons.com) (MIT).
+Instrument-like on purpose: hairline borders, 2 px corners, no pill shapes, and
+frosted translucency — every surface (panels, top bar, menus, caption) is
+see-through and blurs the feed behind it. The chrome (labels, numbers, controls)
+is set in **Overpass Mono** and prose (roast captions, hall of shame) in
+**Overpass** — both self-hosted as woff2 in `web/static/fonts/`, so the page
+renders correctly with no internet. Icons are
+[Heroicons](https://heroicons.com) (MIT).
 
 The score chart is coloured by value through a single vertical ramp — green at
 the top, amber at the warn/roast thresholds, red at the bottom — with a matching

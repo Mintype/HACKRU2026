@@ -5,7 +5,7 @@ import wave
 from pathlib import Path
 
 from voice import roasts, wavutil
-from voice.gemini_text import build_prompt, parse_roasts, validate
+from voice.gemini_text import build_prompt, load_prompt_template, parse_roasts, validate
 
 
 class TestRoasts(unittest.TestCase):
@@ -44,11 +44,38 @@ class TestPromptAndValidation(unittest.TestCase):
             context={"slouch_count": 5, "session_minutes": 23, "worst_neck_angle": 41},
             exclude=["old line"],
         )
-        self.assertIn("NEVER mention appearance", prompt)
+        self.assertIn("never the person", prompt.lower())
+        self.assertIn("no appearance", prompt.lower())
         self.assertIn("slouch number 5", prompt)
         self.assertIn("41 degrees", prompt)
         self.assertIn("old line", prompt)
         self.assertIn("medium", prompt.lower())
+
+    def test_prompt_files_are_loaded_and_mode_specific(self):
+        roast = load_prompt_template(False)
+        nice = load_prompt_template(True)
+        self.assertNotEqual(roast, nice)
+        self.assertIn("insult", roast.lower())
+        self.assertIn("encouragement", nice.lower())
+
+    def test_every_token_is_substituted(self):
+        for nice_mode in (False, True):
+            prompt = build_prompt(
+                count=4,
+                tier="spicy",
+                nice=nice_mode,
+                context={"slouch_count": 2, "session_minutes": 3, "worst_neck_angle": 30},
+                exclude=["a previous line"],
+            )
+            self.assertNotIn("{{", prompt, f"unsubstituted token in nice={nice_mode}")
+            self.assertIn("4", prompt)
+
+    def test_fallback_lines_are_short_enough_to_say_in_one_breath(self):
+        from voice.gemini_text import MAX_WORDS
+
+        for tier in ("mild", "medium", "spicy"):
+            for line in roasts.tier_pool(tier):
+                self.assertLessEqual(len(line.split()), MAX_WORDS, line)
 
     def test_parse_plain_json(self):
         raw = json.dumps({"roasts": [{"text": "Sit up.", "tier": "mild"}]})
@@ -103,6 +130,35 @@ class TestWavUtil(unittest.TestCase):
     def test_mime_params(self):
         rate, width, channels = wavutil.pcm_mime_to_params("audio/L16;rate=24000")
         self.assertEqual((rate, width, channels), (24000, 2, 1))
+
+
+class TestRoastPersonalisation(unittest.TestCase):
+    """Fallback lines may contain {n}; it must never be spoken literally."""
+
+    def _service(self, context):
+        from voice.service import RoastService
+
+        class DummyPlayer:
+            route = "off"
+
+            def play_clip(self, clip):
+                return True
+
+        return RoastService(player=DummyPlayer(), context_provider=lambda: context)
+
+    def test_slouch_number_is_substituted(self):
+        service = self._service({"slouch_count": 5})
+        self.assertEqual(service._personalise_text("Slouch {n}. Ouch."), "Slouch 5. Ouch.")
+
+    def test_missing_count_leaves_text_alone(self):
+        service = self._service({})
+        self.assertEqual(service._personalise_text("Sit up."), "Sit up.")
+
+    def test_fallback_pool_leaves_no_braces(self):
+        service = self._service({"slouch_count": 7})
+        for tier in ("mild", "medium", "spicy"):
+            for item in service._text_source(tier, 6):
+                self.assertNotIn("{n}", item["text"])
 
 
 if __name__ == "__main__":

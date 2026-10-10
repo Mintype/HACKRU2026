@@ -11,17 +11,18 @@
   const TOPBAR = 44;
   const GAP = 12;
   const EDGE = 12;
-  const STORE_KEY = "posturecoach.hud.v2";
+  const STORE_KEY = "posturecoach.hud.v4";
 
   /* ------------------------------------------------------------ registry */
-  // column = where auto-arrange puts it; order = stacking order in that column
+  // column + anchor say where auto-arrange parks a panel; order stacks them in
+  // that corner. `visible: false` starts a panel hidden (still in the menu).
   const PANELS = {
-    system:   { title: "System",        width: 300, column: "left",  order: 0 },
-    chart:    { title: "Score",         width: 560, column: "left",  order: 1, resizable: true, minW: 320, minH: 150 },
-    posture:  { title: "Posture",       width: 300, column: "right", order: 0 },
-    stats:    { title: "Session",       width: 300, column: "right", order: 1 },
-    controls: { title: "Controls",      width: 320, column: "right", order: 2 },
-    roasts:   { title: "Hall of shame", width: 320, column: "right", order: 3 },
+    posture:  { title: "Posture",       width: 300, column: "left",  anchor: "top",    order: 0 },
+    chart:    { title: "Score",         width: 520, column: "left",  anchor: "bottom", order: 0, resizable: true, minW: 320, minH: 150, height: 200 },
+    stats:    { title: "Session",       width: 300, column: "right", anchor: "top",    order: 0 },
+    system:   { title: "System",        width: 300, column: "right", anchor: "top",    order: 1 },
+    controls: { title: "Controls",      width: 320, column: "right", anchor: "bottom", order: 0 },
+    roasts:   { title: "Hall of shame", width: 320, column: "right", anchor: "bottom", order: 1, visible: false },
   };
 
   const STATE_CLASS = {
@@ -45,11 +46,11 @@
   const panels = {}; // id -> { visible, x, y, w, h, collapsed }
   for (const id in PANELS) {
     panels[id] = {
-      visible: true,
+      visible: PANELS[id].visible !== false,
       x: null,
       y: null,
       w: PANELS[id].width,
-      h: PANELS[id].resizable ? 210 : null,
+      h: PANELS[id].resizable ? PANELS[id].height || 200 : null,
       collapsed: false,
     };
   }
@@ -88,7 +89,7 @@
       el.style.display = p.visible ? "" : "none";
       el.classList.toggle("collapsed", !!p.collapsed);
       el.style.width = p.w + "px";
-      el.style.height = PANELS[id].resizable ? p.h + "px" : "";
+      el.style.height = PANELS[id].resizable ? (p.h || PANELS[id].height || 200) + "px" : "";
       if (p.x != null && p.y != null) {
         el.style.left = p.x + "px";
         el.style.top = p.y + "px";
@@ -100,11 +101,16 @@
     const vw = window.innerWidth;
     const vh = hudHeight();
     const single = vw < 980;
-    const cursor = { left: 8, right: 8 };
+    // Panels are parked against the edges so the middle of the frame — where
+    // the person actually is — stays clear.
+    const cursor = {
+      left:  { top: 8, bottom: vh - 8 },
+      right: { top: 8, bottom: vh - 8 },
+    };
 
     const ids = Object.keys(PANELS).sort((a, b) => {
-      const ca = PANELS[a].column === "left" ? 0 : 1;
-      const cb = PANELS[b].column === "left" ? 0 : 1;
+      const ca = single || PANELS[a].column === "left" ? 0 : 1;
+      const cb = single || PANELS[b].column === "left" ? 0 : 1;
       return ca - cb || PANELS[a].order - PANELS[b].order;
     });
 
@@ -113,22 +119,20 @@
       const el = panelEl(id);
       if (!el || !p.visible) continue;
 
-      p.w = Math.min(p.w || PANELS[id].width, vw - EDGE * 2);
+      p.w = Math.min(PANELS[id].width, vw - EDGE * 2);
       el.style.width = p.w + "px";
-      if (PANELS[id].resizable) el.style.height = p.h + "px";
+      if (PANELS[id].resizable) el.style.height = (p.h || PANELS[id].height || 200) + "px";
 
-      const column = single ? "left" : PANELS[id].column;
       const height = el.offsetHeight || 160;
-      if (column === "left") {
-        p.x = EDGE;
-        p.y = cursor.left;
-        cursor.left += height + GAP;
-      } else {
-        p.x = Math.max(EDGE, vw - p.w - EDGE);
-        p.y = cursor.right;
-        cursor.right += height + GAP;
-      }
-      p.y = Math.min(p.y, Math.max(8, vh - height - 8));
+      const column = single ? "left" : PANELS[id].column;
+      const anchor = single ? "top" : (PANELS[id].anchor || "top");
+      const x = column === "left" ? EDGE : Math.max(EDGE, vw - p.w - EDGE);
+      const y = anchor === "top" ? cursor[column].top : cursor[column].bottom - height;
+
+      p.x = x;
+      p.y = Math.max(8, Math.min(y, Math.max(8, vh - height - 8)));
+      cursor[column][anchor] += anchor === "top" ? height + GAP : -(height + GAP);
+
       el.style.left = p.x + "px";
       el.style.top = p.y + "px";
     }
@@ -151,6 +155,23 @@
     save();
   }
 
+  //: A restored layout is only trusted if every panel is actually on screen -
+  //: otherwise (different monitor, stale storage, first run) we re-arrange.
+  function layoutFits() {
+    const vw = window.innerWidth;
+    const vh = hudHeight();
+    for (const id in PANELS) {
+      const p = panels[id];
+      const el = panelEl(id);
+      if (!el || !p.visible) continue;
+      if (p.x == null || p.y == null) return false;
+      if (p.x < -1 || p.y < -1) return false;
+      if (p.x + el.offsetWidth > vw + 2) return false;
+      if (p.y + Math.min(el.offsetHeight, vh) > vh + 2) return false;
+    }
+    return true;
+  }
+
   function initDrag() {
     for (const id in PANELS) {
       const el = panelEl(id);
@@ -164,7 +185,7 @@
         const startY = ev.clientY;
         const originX = p.x ?? el.offsetLeft;
         const originY = p.y ?? el.offsetTop;
-        head.setPointerCapture(ev.pointerId);
+        try { head.setPointerCapture(ev.pointerId); } catch (e) { /* synthetic pointer */ }
         el.classList.add("dragging");
 
         const onMove = (e) => {
@@ -201,7 +222,7 @@
         const startY = ev.clientY;
         const originW = el.offsetWidth;
         const originH = el.offsetHeight;
-        handle.setPointerCapture(ev.pointerId);
+        try { handle.setPointerCapture(ev.pointerId); } catch (e) { /* synthetic pointer */ }
 
         const onMove = (e) => {
           p.w = clamp(originW + (e.clientX - startX), PANELS[id].minW, window.innerWidth - p.x - EDGE);
@@ -323,8 +344,15 @@
       save();
     });
     $("btn-reset-layout").addEventListener("click", () => {
-      for (const id in panels) {
-        panels[id] = { ...panels[id], visible: true, collapsed: false, x: null, y: null, w: PANELS[id].width, h: PANELS[id].resizable ? 210 : null };
+      for (const id in PANELS) {
+        panels[id] = {
+          visible: PANELS[id].visible !== false,
+          collapsed: false,
+          x: null,
+          y: null,
+          w: PANELS[id].width,
+          h: PANELS[id].resizable ? PANELS[id].height || 200 : null,
+        };
       }
       applyVisibility();
       arrange();
@@ -800,9 +828,14 @@
   function init() {
     load();
     applyVisibility();
-    const needsArrange = Object.keys(PANELS).some((id) => panels[id].visible && panels[id].x == null);
-    if (needsArrange) arrange();
-    else clampAll();
+    if (!layoutFits()) {
+      arrange();
+      // Panel heights settle once the canvas and fonts have laid out, so one
+      // more pass keeps the corner stacking exact on a first run.
+      requestAnimationFrame(() => arrange());
+    } else {
+      clampAll();
+    }
 
     initDrag();
     initResize();

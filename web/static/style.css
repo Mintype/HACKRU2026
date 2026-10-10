@@ -9,8 +9,10 @@
   --faint:    #6d7581;
   --line:     rgba(255, 255, 255, 0.17);
   --line-soft:rgba(255, 255, 255, 0.08);
-  --plate:    rgba(9, 11, 14, 0.76);
-  --plate-hi: rgba(9, 11, 14, 0.9);
+  --plate:    rgba(9, 11, 14, 0.42);
+  --plate-hi: rgba(9, 11, 14, 0.56);
+  --blur: 15px;
+  --blur-hi: 22px;
 
   --good: #82c08e;
   --warn: #d8b25c;
@@ -66,8 +68,12 @@ html, body {
   align-items: center;
   gap: 12px;
   padding: 0 10px 0 12px;
-  background: rgba(9, 11, 14, 0.82);
-  border-bottom: 1px solid var(--line-soft);
+  background: rgba(9, 11, 14, 0.5);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(125%);
+  backdrop-filter: blur(var(--blur)) saturate(125%);
+  /* Hairline drawn inside, so it does not steal a pixel from the content box
+     (a real border made flex centring land 0.5px high). */
+  box-shadow: inset 0 -1px 0 var(--line-soft);
   z-index: 30;
 }
 .spacer { flex: 1; }
@@ -162,6 +168,8 @@ body.is-fullscreen .icon-exit { display: block; }
   width: 216px;
   padding: 10px;
   background: var(--plate-hi);
+  -webkit-backdrop-filter: blur(var(--blur-hi)) saturate(125%);
+  backdrop-filter: blur(var(--blur-hi)) saturate(125%);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   z-index: 40;
@@ -208,6 +216,8 @@ body.is-fullscreen .icon-exit { display: block; }
   pointer-events: auto;
   width: 300px;
   background: var(--plate);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(125%);
+  backdrop-filter: blur(var(--blur)) saturate(125%);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
@@ -221,7 +231,7 @@ body.is-fullscreen .icon-exit { display: block; }
   justify-content: space-between;
   height: 26px;
   padding: 0 4px 0 10px;
-  border-bottom: 1px solid var(--line-soft);
+  box-shadow: inset 0 -1px 0 var(--line-soft);
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -410,6 +420,8 @@ body.is-fullscreen .icon-exit { display: block; }
   align-items: center;
   padding: 18px 26px;
   background: var(--plate-hi);
+  -webkit-backdrop-filter: blur(var(--blur-hi)) saturate(125%);
+  backdrop-filter: blur(var(--blur-hi)) saturate(125%);
   border: 1px solid var(--line);
   border-radius: var(--radius);
 }
@@ -427,6 +439,8 @@ body.is-fullscreen .icon-exit { display: block; }
   padding: 12px 18px 14px;
   text-align: center;
   background: var(--plate-hi);
+  -webkit-backdrop-filter: blur(var(--blur-hi)) saturate(125%);
+  backdrop-filter: blur(var(--blur-hi)) saturate(125%);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   opacity: 0;
