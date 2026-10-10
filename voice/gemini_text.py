@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
@@ -26,6 +28,46 @@ log = logging.getLogger(__name__)
 
 #: Drop generated lines longer than this (kept just above the 6-12 the prompt asks for).
 MAX_WORDS = 14
+
+#: How long to skip a text model that failed because it is gone or out of quota.
+MODEL_SKIP_SECONDS = 6 * 3600
+
+#: Text models in preference order. They get retired (gemini-2.5-flash answers
+#: 404 "no longer available to new users" for newer accounts), so the chain is the
+#: safety net: if the configured one is gone or rate-limited, the next answers.
+DEFAULT_TEXT_MODEL = "gemini-3.8-flash"
+FALLBACK_TEXT_MODELS = (
+    "gemini-3.8-flash",
+    "gemini-flash-latest",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-2.5-flash",
+)
+
+
+def is_quota_error(message: str) -> bool:
+    text = (message or "").upper()
+    return "RESOURCE_EXHAUSTED" in text or "429" in text or "QUOTA" in text
+
+
+def is_model_gone(message: str) -> bool:
+    text = (message or "").upper()
+    return "NOT_FOUND" in text or "404" in text or "NO LONGER AVAILABLE" in text
+
+
+def model_backoff_seconds(message: str, default: float = 3600.0) -> float:
+    """How long to skip this model: the quota retry hint, or a long rest if gone."""
+    if is_model_gone(message):
+        return MODEL_SKIP_SECONDS
+    if is_quota_error(message):
+        match = re.search(r"retryDelay'?\s*:\s*'?(\d+)s", message or "")
+        if match:
+            return min(float(match.group(1)), MODEL_SKIP_SECONDS)
+        match = re.search(r"retry in (\d+)h(\d+)m", message or "")
+        if match:
+            return min(int(match.group(1)) * 3600 + int(match.group(2)) * 60, MODEL_SKIP_SECONDS)
+        return min(default, MODEL_SKIP_SECONDS)
+    return 60.0
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 PROMPT_FILES = {False: "roast.txt", True: "nice.txt"}
@@ -245,10 +287,34 @@ class RoastWriter:
         max_words: int = MAX_WORDS,
     ):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY") or ""
-        self.model = model or os.environ.get("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
+        #: Preferred model; the rest of FALLBACK_TEXT_MODELS is tried after it.
+        self.model = model or os.environ.get("GEMINI_TEXT_MODEL") or DEFAULT_TEXT_MODEL
         self.max_words = max_words
         self._client = None
         self.last_error: Optional[str] = None
+        #: model -> epoch until which it is skipped (retired, or out of quota)
+        self._model_cooldown: Dict[str, float] = {}
+        #: Which model actually answered last.
+        self.model_used: Optional[str] = None
+
+    def models(self) -> List[str]:
+        """Preferred model first, then the known fallbacks."""
+        seen: set = set()
+        out: List[str] = []
+        for model in [self.model, *FALLBACK_TEXT_MODELS]:
+            if model and model not in seen:
+                seen.add(model)
+                out.append(model)
+        return out
+
+    def _cooling_down(self, model: str) -> bool:
+        until = self._model_cooldown.get(model, 0.0)
+        if not until:
+            return False
+        if time.time() >= until:
+            self._model_cooldown.pop(model, None)
+            return False
+        return True
 
     @property
     def available(self) -> bool:
@@ -274,12 +340,34 @@ class RoastWriter:
         prompt = build_prompt(count=count, tier=tier, nice=nice, context=context, exclude=exclude)
         items: List[Dict[str, str]] = []
         if self.available:
-            try:
-                items = self._call(prompt, count, tier, nice)
+            for model in self.models():
+                if self._cooling_down(model):
+                    continue
+                try:
+                    items = self._call(prompt, count, tier, nice, model)
+                except Exception as exc:
+                    message = str(exc)
+                    delay = model_backoff_seconds(message)
+                    self._model_cooldown[model] = time.time() + delay
+                    self.last_error = message
+                    log.warning(
+                        "Gemini text model %s failed (%s); skipping it for %.0f min",
+                        model,
+                        message[:90],
+                        delay / 60.0,
+                    )
+                    items = []
+                    continue
+                if not items:
+                    # Answered but gave nothing usable; let the next model try.
+                    self.last_error = "empty response"
+                    self._model_cooldown[model] = time.time() + 60.0
+                    continue
+                if self.model_used != model:
+                    log.info("Gemini is writing roasts with %s", model)
+                self.model_used = model
                 self.last_error = None
-            except Exception as exc:
-                self.last_error = str(exc)
-                log.warning("Gemini text generation failed (%s); using fallbacks", exc)
+                break
         items = validate(items, tier="nice" if nice else tier, exclude=list(exclude))[:count]
         if len(items) < count:
             items += fallback_batch(
@@ -292,7 +380,9 @@ class RoastWriter:
             )
         return items[:count]
 
-    def _call(self, prompt: str, count: int, tier: str, nice: bool) -> List[Dict[str, str]]:
+    def _call(
+        self, prompt: str, count: int, tier: str, nice: bool, model: Optional[str] = None
+    ) -> List[Dict[str, str]]:
         from google.genai import types
 
         client = self._get_client()
@@ -322,7 +412,7 @@ class RoastWriter:
             config_kwargs["response_schema"] = schema
 
         response = client.models.generate_content(
-            model=self.model,
+            model=model or self.model,
             contents=prompt,
             config=types.GenerateContentConfig(**config_kwargs),
         )

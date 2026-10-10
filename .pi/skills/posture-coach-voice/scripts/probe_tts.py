@@ -39,6 +39,7 @@ if str(ROOT) not in sys.path:
 import config  # noqa: E402
 from server.settings import Settings  # noqa: E402
 from voice.eleven_tts import ElevenLabsTTS  # noqa: E402
+from voice.gemini_text import RoastWriter  # noqa: E402
 from voice.tts_local import LocalTTS  # noqa: E402
 
 DEFAULT_TEXT = "Sit up. Your spine has filed a complaint."
@@ -49,6 +50,7 @@ def describe() -> int:
     settings = Settings()
     eleven = ElevenLabsTTS()
     local = LocalTTS()
+    writer = RoastWriter()
 
     print("configuration (no requests made)")
     print("-" * 78)
@@ -56,9 +58,12 @@ def describe() -> int:
     print(f"  ElevenLabs key    : {'yes' if eleven.available else 'NO'}")
     print(f"    voice / model   : {eleven.voice_name} ({eleven.voice_id}) / {eleven.model}")
     print(f"    output format   : {eleven.output_format}")
+    print(f"  Gemini text key   : {'yes' if writer.available else 'NO'}")
+    print(f"    preferred model : {writer.model}")
+    print(f"    model chain     : {', '.join(writer.models())}")
     print(f"  local engine      : {local.engine or 'none'} (voice {local.voice})")
     print("-" * 78)
-    print("  auto order: ElevenLabs -> local")
+    print("  auto order: ElevenLabs -> local.  Roasts are written by Gemini.")
     return 0
 
 
@@ -86,6 +91,16 @@ def probe(text: str) -> int:
             print(f"  OK      {out.stat().st_size:,} bytes via {local.engine}")
         else:
             print("  FAILED")
+
+        print("\nGemini text (a tiny batch, to prove the chef can actually write)")
+        writer = RoastWriter()
+        if not writer.available:
+            print("  no GEMINI_API_KEY, skipping")
+        else:
+            items = writer.generate(count=2, tier="mild")
+            print(f"  wrote with {writer.model_used or 'offline fallbacks'}")
+            for item in items:
+                print(f"    - {item['text']}")
     return 0
 
 

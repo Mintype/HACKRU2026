@@ -659,7 +659,18 @@
       );
     }
     if (reading.head_down_deg !== undefined) {
-      setField("dbg-head", `${num(reading.head_down_deg, 0)}\u00b0`);
+      // Show the value, the calibrated reference and the difference: without the
+      // reference the phone threshold is impossible to reason about.
+      const delta = reading.phone_delta_deg;
+      const ref = reading.head_ref_deg;
+      let text = `${num(reading.head_down_deg, 0)}\u00b0`;
+      text += ref === null || ref === undefined ? "   ref --" : `   ref ${num(ref, 0)}\u00b0`;
+      if (delta !== null && delta !== undefined) text += `   +${num(delta, 0)}\u00b0`;
+      setField(
+        "dbg-head",
+        text,
+        delta !== null && delta !== undefined && delta >= 20 ? "warn" : ""
+      );
     }
     if (reading.slouch_seconds !== undefined) setField("dbg-slouch", `${num(reading.slouch_seconds, 1)}s`);
     if (reading.cooldown_remaining !== undefined) {

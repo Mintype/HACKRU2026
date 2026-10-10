@@ -23,7 +23,10 @@ def upright():
     return {
         "side": "right",
         "ear": (100.0, 100.0, 1.0),
+        "eye": (150.0, 105.0, 1.0),
+        "nose": (185.0, 110.0, 1.0),
         "shoulder": (100.0, 200.0, 1.0),
+        "wrist": (120.0, 320.0, 1.0),
         "hip": (100.0, 300.0, 1.0),
         "knee": (200.0, 310.0, 1.0),
     }
@@ -34,7 +37,10 @@ def slouching():
     return {
         "side": "right",
         "ear": (150.0, 110.0, 1.0),
+        "eye": (200.0, 115.0, 1.0),
+        "nose": (235.0, 120.0, 1.0),
         "shoulder": (100.0, 200.0, 1.0),
+        "wrist": (120.0, 320.0, 1.0),
         "hip": (100.0, 300.0, 1.0),
         "knee": (200.0, 310.0, 1.0),
     }
@@ -115,6 +121,42 @@ class TestPostureDetector(unittest.TestCase):
         reading = detector.process(frame=None, ts=0.0)
         self.assertEqual(reading["slouch_part"], "torso")
         self.assertGreater(reading["torso_drift"], reading["neck_drift"])
+
+    def test_phone_is_false_until_the_head_is_actually_down(self):
+        detector = self.make(upright())
+        detector.set_baseline(12.0, 4.0)
+        reading = detector.process(frame=None, ts=0.0)
+        # eye ~6 degrees below the ear: level, not a phone
+        self.assertFalse(reading["phone"])
+        self.assertIsNone(reading["head_ref_deg"])
+
+    def test_phone_is_measured_against_the_calibrated_head_level(self):
+        landmarks = upright()
+        detector = self.make(landmarks)
+        detector.set_baseline(12.0, 4.0)
+        # calibrate while sitting up: eye roughly level with the ear
+        detector.start_head_calibration(0.0, 1.0)
+        for i in range(12):
+            detector.process(frame=None, ts=i * 0.1)
+        self.assertIsNotNone(detector.head_down_baseline)
+        reference = detector.head_down_baseline
+
+        # now stare down: about 45 degrees of tilt
+        landmarks["eye"] = (170.0, 180.0, 1.0)
+        for i in range(20):
+            reading = detector.process(frame=None, ts=2.0 + i * 0.1)
+        self.assertTrue(reading["phone"])
+        self.assertAlmostEqual(reading["head_ref_deg"], round(reference, 1), places=1)
+        self.assertGreater(reading["phone_delta_deg"], 20.0)
+
+    def test_phone_is_false_when_the_eye_is_hidden(self):
+        landmarks = upright()
+        landmarks["eye"] = (170.0, 180.0, 0.01)
+        detector = self.make(landmarks)
+        detector.set_baseline(12.0, 4.0)
+        reading = detector.process(frame=None, ts=0.0)
+        self.assertIsNone(reading["head_down_deg"])
+        self.assertFalse(reading["phone"])
 
     @unittest.skipUnless(HAVE_NUMPY and HAVE_CV2, "numpy + opencv required")
     def test_overlay_draws_without_error(self):

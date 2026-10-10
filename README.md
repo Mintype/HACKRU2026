@@ -172,7 +172,16 @@ the app.
 The **delivery** is not a prompt: ElevenLabs takes `voice_settings`, so the tier
 of an insult maps to stability/style numbers (see the table below).
 
-**Never repeating, and never boring.** Every insult actually said is appended to
+### The chef
+
+The roast prompt casts the model as **a furious chef inspecting a dish it did not
+order: your posture** — everything is RAW, under-seasoned, badly plated — and it
+requires **one vivid comparison per line**, with food as the house speciality (a raw
+chicken, a collapsed soufflé, a soggy bottom). Nice mode is the same chef, delighted.
+The writing angles in `voice/roasts.py:TOPICS` include kitchen angles, and the
+offline pools carry chef lines too, so the persona survives without an API key.
+
+### Never repeating, and never boring. Every insult actually said is appended to
 `data/insults.txt`, one per line. That ledger is enforced in four places:
 
 1. its most recent lines are sent to Gemini as banned in the prompt
@@ -231,7 +240,7 @@ cooldown:
 | ------- | --------- | ------- |
 | **sustained slouch** | score below `lower_threshold` for `roast_seconds` | 0.70 for 10 s |
 | **bad posture** | score below `bad_score_threshold` held for `bad_score_seconds` | 0.45 for 3 s |
-| **phone** | head down (`head_down_deg` over the pitch threshold) for `phone_threshold_seconds` | 10 s |
+| **phone** | head down — `head_down_deg` that much past the level recorded during calibration — for `phone_threshold_seconds` | 10 s |
 
 The phone trigger is separate on purpose: someone can sit up perfectly straight and
 still stare into their lap, and the posture score says nothing about it.
@@ -323,7 +332,8 @@ rather than website settings.
 | `seated_delay` | `2 s` | How long that must hold before a session starts, so someone still sitting down is not roasted. |
 | `standup_delay` | `1 s` | How long "not seated" must hold before the state goes `away`. |
 | `min_visibility` | `0.3` | Knee/eye visibility below which that landmark is ignored. |
-| `phone_pitch_threshold` | `40°` | Head-down angle at which the phone heuristic starts counting. **Tune this against your camera**: the Debug panel shows the live `head_down_deg`. |
+| `phone_pitch_delta` | `20°` | Extra downward tilt, past the head level recorded while calibrating, that counts as looking down. Relative on purpose: there is no camera angle to guess. |
+| `phone_pitch_fallback` | `45°` | Absolute angle used only until a head reference has been measured. |
 | `phone_delay` | `1.5 s` | How long the head must stay down before it counts as phone use, so a glance down does not trigger it. |
 | `model` | `lite` | MediaPipe pose model: `lite`, `full` or `heavy`. `lite` is the one that keeps 10+ fps on a Pi. |
 | `fps_target` | `10` | Frames per second the vision loop aims for. Posture changes slowly; 5 fps of detection is still enough. |
@@ -411,7 +421,7 @@ offender does not sound like a first slip.
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
 | `GEMINI_API_KEY` | — | Lets Gemini **write** the roasts. Without it the hand-written fallbacks are used. |
-| `GEMINI_TEXT_MODEL` | `gemini-2.5-flash` | Text model for writing roasts. |
+| `GEMINI_TEXT_MODEL` | `gemini-3.8-flash` | Text model for writing roasts. Older ones get **retired for new accounts** (`gemini-2.5-flash` answers 404), so the writer walks a fallback chain. |
 | `ELEVENLABS_API_KEY` | — | The voice. Without it, `auto` uses the local engine. |
 | `ELEVENLABS_VOICE_ID` | Sarah | Any voice your plan allows. |
 | `ELEVENLABS_MODEL` | `eleven_flash_v2_5` | ElevenLabs model. |
@@ -584,6 +594,7 @@ Rebooting should bring the website back by itself within a minute.
 | A roast never plays | the sustained trigger needs 10 s of *continuous* slouching (or a deep slouch for 3 s) | set **Roast (s)** low, or run `run.py --demo`, and watch the pill go amber then red |
 | The voice sounds robotic | the local engine, not ElevenLabs | check the System panel's **Voice** row; add `ELEVENLABS_API_KEY`, or run `--test-voice` to see which engine answered |
 | Voices change between roasts | a pool filled by two engines, or old cached clips | set **Voice** to one engine (which clears the pool), and delete `data/roasts/` to re-voice everything |
+| Insults repeat, or sound generic | Gemini is not writing them — the model was retired (a 404 in the log) and the offline pools are being used | check `Gemini is writing roasts with …` in the log, or run `probe_tts.py --live` to see which model answers; the chain picks a live one, and `GEMINI_TEXT_MODEL` sets which to try first |
 | Roasts repeat | the hand-written fallback pool is finite | add a Gemini key so roasts are written fresh; check `data/insults.txt` |
 | Roasts are silent but captions appear | audio route, or the Bluetooth link dropped | try **Voice → Local**, switch the route to cast, and confirm the Nest is paired |
 | Under ~8 fps, laggy overlay | an oversized model | `--model lite`, smaller frames, or detect on every second frame |

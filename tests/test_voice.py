@@ -85,7 +85,13 @@ class TestPromptAndValidation(unittest.TestCase):
         nice = load_prompt_template(True)
         self.assertNotEqual(roast, nice)
         self.assertIn("insult", roast.lower())
-        self.assertIn("encouragement", nice.lower())
+        self.assertIn("praise", nice.lower())
+
+    def test_the_roast_prompt_is_a_chef_who_always_compares(self):
+        roast = load_prompt_template(False)
+        self.assertIn("chef", roast.lower())
+        self.assertIn("food", roast.lower())
+        self.assertIn("comparison", roast.lower())
 
     def test_prompt_names_the_failing_part(self):
         neck = build_prompt(count=3, tier="mild", context={"slouch_part": "neck"})
@@ -478,6 +484,62 @@ class TestOriginality(unittest.TestCase):
             service._deliver(Clip(text="first thing said", tier="mild"), {})
             service._deliver(Clip(text="second thing said", tier="mild"), {})
             self.assertEqual(service._exclude_list()[0], "second thing said")
+
+
+class TestGeminiTextModelChain(unittest.TestCase):
+    """Text models get retired (gemini-2.5-flash answers 404 for newer accounts),
+    so the writer must walk a chain instead of falling back to hand-written lines
+    for ever."""
+
+    def test_backoff_helpers(self):
+        from voice.gemini_text import MODEL_SKIP_SECONDS, is_model_gone, is_quota_error, model_backoff_seconds
+
+        self.assertTrue(is_model_gone("404 NOT_FOUND. This model is no longer available"))
+        self.assertFalse(is_model_gone("connection reset by peer"))
+        self.assertTrue(is_quota_error("429 RESOURCE_EXHAUSTED"))
+        self.assertEqual(model_backoff_seconds("404 NOT_FOUND"), MODEL_SKIP_SECONDS)
+        self.assertGreater(model_backoff_seconds("429 ... 'retryDelay': '14287s'"), 3600)
+
+    def test_a_retired_model_falls_through_to_the_next(self):
+        from voice.gemini_text import RoastWriter
+
+        writer = RoastWriter(api_key="fake-key", model="retired-model")
+        tried = []
+
+        def fake_call(prompt, count, tier, nice, model=None):
+            tried.append(model)
+            if model == "retired-model":
+                raise RuntimeError("404 NOT_FOUND. This model is no longer available to new users")
+            return [{"text": f"line number {i}", "tier": tier} for i in range(count)]
+
+        writer._call = fake_call
+        items = writer.generate(count=3, tier="mild")
+        self.assertEqual(tried[0], "retired-model")
+        self.assertNotEqual(tried[1], "retired-model")
+        self.assertEqual(writer.model_used, tried[1])
+        self.assertTrue(writer._cooling_down("retired-model"))
+        self.assertEqual(len(items), 3)
+
+    def test_every_model_failing_still_produces_offline_lines(self):
+        from voice.gemini_text import RoastWriter
+
+        writer = RoastWriter(api_key="fake-key")
+
+        def always_404(prompt, count, tier, nice, model=None):
+            raise RuntimeError("404 NOT_FOUND")
+
+        writer._call = always_404
+        items = writer.generate(count=3, tier="mild")
+        self.assertEqual(len(items), 3)
+        self.assertTrue(writer.last_error)
+
+    def test_no_api_key_means_fallbacks_without_calling_anything(self):
+        from voice.gemini_text import RoastWriter
+
+        writer = RoastWriter(api_key="")
+        writer.api_key = ""
+        items = writer.generate(count=3, tier="mild")
+        self.assertEqual(len(items), 3)
 
 
 class TestProviderOrder(unittest.TestCase):

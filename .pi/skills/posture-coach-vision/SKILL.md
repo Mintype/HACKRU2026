@@ -75,12 +75,18 @@ A third fault, and deliberately **not** part of the posture score: someone can s
 up perfectly straight and still stare into their lap.
 
 It is a heuristic, not object detection — `angles.head_pitch()` measures the tilt of
-the ear→eye line against horizontal, and a sustained tilt past
-`phone_pitch_threshold` (~40°) for `phone_delay` (~1.5 s) sets `phone` on the
-reading. That is what a phone, a lap and a keyboard have in common ("looking down
-for a long time"), which is why it is tunable rather than clever: **watch
-`head_down_deg` on the Debug panel while someone looks at a phone and set the
-threshold from what you actually see.**
+the ear→eye line against horizontal — but it is measured **relative to a
+reference**, not against a guessed angle: on session start the detector records the
+head tilt of "sitting up straight" for `calibration_seconds`, and looking down is
+`phone_pitch_delta` (~20°) of extra tilt past that. `phone_pitch_fallback` (~45°)
+is used only until a reference exists. A sustained tilt for `phone_delay` (~1.5 s)
+sets `phone` on the reading.
+
+That is what a phone, a lap and a keyboard have in common ("looking down for a long
+time"), which is why it is tunable rather than clever: the Debug panel shows
+`head_down_deg`, the reference and the difference, so the numbers can be read off a
+real camera instead of guessed. If phone detection never fires, check that row:
+`ref --` means calibration has not run yet (no session started).
 
 The state machine runs it outside the slouch machine (`_phone`): on `phone` it
 enters the `phone` state (red), and after `phone_threshold_seconds` (~10 s) fires

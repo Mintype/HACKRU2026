@@ -216,6 +216,12 @@ class VisionService(threading.Thread):
                     self.session_id = self.db.start_session(event.get("ts"))
                 except Exception:
                     pass
+            # Measure this person's "sitting up straight" head tilt, so the
+            # phone rule is relative to them rather than a guessed angle.
+            if self.detector is not None:
+                self.detector.start_head_calibration(
+                    event.get("ts") or time.time(), self.state_machine.config.calibration_seconds
+                )
         elif name == "calibrated":
             if self.detector is not None:
                 self.detector.set_baseline(event.get("neck_baseline", 0.0), event.get("torso_baseline", 0.0))
@@ -268,6 +274,8 @@ class VisionService(threading.Thread):
                 "slouch_part": reading.get("slouch_part"),
                 "thigh_angle": reading.get("thigh_angle"),
                 "head_down_deg": reading.get("head_down_deg"),
+                "head_ref_deg": reading.get("head_ref_deg"),
+                "phone_delta_deg": reading.get("phone_delta_deg"),
                 "hands_up": reading.get("hands_up"),
                 "phone": reading.get("phone"),
                 "phone_seconds": reading.get("phone_seconds"),

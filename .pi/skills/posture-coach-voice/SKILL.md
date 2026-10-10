@@ -26,8 +26,22 @@ TIER_SETTINGS` (stability falls and style rises as the roast escalates).
 
 ## Providers and quota reality
 
-**Gemini writes the roasts; ElevenLabs speaks them.** `tts_mode` (Controls →
-Voice) is `auto | elevenlabs | local`, and `auto` is simply:
+**Gemini writes the roasts; ElevenLabs speaks them.**
+
+Text generation walks a **model chain** the same way the voice does:
+`RoastWriter.models()` tries the configured `GEMINI_TEXT_MODEL` and then known
+fallbacks, and a model that answers 404 (retired) or 429 (quota) is skipped for its
+backoff window with the reason logged. This matters: `gemini-2.5-flash` now answers
+*"no longer available to new users"*, so a pinned old model means **every roast
+silently comes from the offline pools** — which reads as "the insults are unoriginal
+and repeat". Check the log for `Gemini is writing roasts with …`, or run
+`probe_tts.py --live`, which prints the model that answered and a sample line.
+
+The chef persona lives in `voice/prompts/roast.txt`: a furious chef inspecting the
+posture as a badly plated dish, required to land one vivid food/kitchen comparison
+per line. `nice.txt` is the same chef, delighted.
+
+`tts_mode` (Controls → Voice) is `auto | elevenlabs | local`, and `auto` is simply:
 
 1. **ElevenLabs** (`ELEVENLABS_API_KEY`) — free tier is **characters per month**,
    which suits these one-liners far better than a per-day request cap.

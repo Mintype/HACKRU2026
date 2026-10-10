@@ -34,6 +34,11 @@ MILD = [
     "Your shoulders called. They want to come back.",
     "Sit up. This is a chair, not a hammock.",
     "You drifted. The chair did not.",
+    "That posture is RAW. Sit up.",
+    "You are plating a slump. Start again.",
+    "That is undercooked. Straighten up.",
+    "Where is the seasoning? Where is the spine?",
+    "This dish is a question mark. Fix it.",
 ]
 
 MEDIUM = [
@@ -57,6 +62,11 @@ MEDIUM = [
     "Even the chair is leaning away from you.",
     "That is a slump with a business plan.",
     "Sit up before your ribs meet your hips.",
+    "That slouch is a soggy bottom. Unacceptable.",
+    "You have overcooked the spine and undercooked the point.",
+    "This plate is a crime against the chair.",
+    "That is not sitting, that is a collapsed souffle.",
+    "You are folding like badly rolled pastry.",
 ]
 
 SPICY = [
@@ -80,6 +90,11 @@ SPICY = [
     "Sit up before the desk files a missing person report.",
     "That hunch has tenure now.",
     "Your posture is a cautionary tale with a keyboard.",
+    "Your spine is a raw chicken. Sit up.",
+    "That posture would not pass the pass. Out of my kitchen.",
+    "You are one degree from being sent back to the kitchen.",
+    "Today's special is disappointment, and you are plating it.",
+    "This dish is burnt, and so is your posture.",
 ]
 
 #: Aimed at whichever part is actually giving way, mixed into the batch.
@@ -94,6 +109,9 @@ NECK = [
     "Head back. Your neck has somewhere to be.",
     "You are peering like the screen owes you money.",
     "Your head has left the rest of you behind.",
+    "Chin back. Your neck is overproofed dough.",
+    "Sit up. Your neck is a limp noodle.",
+    "That head is jutting like an unplated garnish.",
 ]
 
 TORSO = [
@@ -107,19 +125,22 @@ TORSO = [
     "Your spine is doing an impression of a banana.",
     "Sit up. Your ribs deserve better than this.",
     "Your back wants a better chair, not a rescue.",
+    "Straighten up. Your spine is a collapsed souffle.",
+    "That back is a folded napkin, not a spine.",
+    "Your torso is slumping like a bad custard.",
 ]
 
 #: Phone use is its own fault: these are picked when the head is down.
 PHONE = [
-    "Put the phone down. It is not that interesting.",
+    "Put the phone down. That is not the dish I ordered.",
+    "Look up. Whatever is on that screen is undercooked.",
+    "That is a phone, not a garnish. Look at the room.",
+    "Your neck is paying for that screen, and it is RAW.",
+    "You are folded over a rectangle again. Badly plated.",
+    "Heads up. Literally. That plate is going cold.",
+    "The phone won this round. Your posture is burnt.",
     "Your phone has seen enough of your face for one day.",
-    "Look up. Whatever that is can wait ten seconds.",
-    "That is a phone, not a posture aid.",
-    "Your neck is paying for whatever you are reading.",
     "Sit up and look at the room, not your lap.",
-    "The phone won this round. Your spine lost.",
-    "Heads up. Literally.",
-    "You are folded over a rectangle again.",
     "Your screen is not going anywhere. Neither are you, apparently.",
 ]
 
@@ -138,6 +159,10 @@ NICE = [
     "Your back just sent a thank you note.",
     "That is a posture worth keeping.",
     "Strong, tall, and quietly excellent.",
+    "Finally, something I would serve.",
+    "That is a dish with a spine. Beautiful.",
+    "Now that is cooked to perfection.",
+    "Seasoned, aligned, and ready to serve.",
 ]
 
 #: A fresh angle per batch, so consecutive roasts do not sound the same.
@@ -159,6 +184,13 @@ TOPICS = (
     "Write as a playwright describing a tragedy in one line.",
     "Write as the camera, which has seen all of this before.",
     "Write about the phone or screen they are staring at.",
+    "Write as a furious chef inspecting a badly plated dish.",
+    "Compare the posture to a badly cooked piece of food.",
+    "Compare the spine to an overcooked noodle.",
+    "Write as a chef sending the dish back to the kitchen.",
+    "Compare the slouch to a collapsed souffle.",
+    "Write as a chef who has just tasted something awful.",
+    "Compare the posture to the soggy bottom of a pie.",
 )
 
 POOLS: Dict[str, List[str]] = {"mild": MILD, "medium": MEDIUM, "spicy": SPICY, "nice": NICE}

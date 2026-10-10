@@ -83,6 +83,10 @@ Other events: `session_start`, `calibrated`, `good`, `session_end`, `state`.
   hud skill — run it after touching the UI.
 - Bump the `localStorage` layout key in `web/static/app.js` (`posturecoach.hud.vN`)
   whenever default panel positions change, or existing users keep the old defaults.
+- **Model names get retired.** Both the text model and the TTS model walk fallback
+  chains with per-model backoff, because a pinned old model fails *silently* into
+  the offline pools (roasts repeat) or the local voice. If output suddenly gets
+  repetitive or robotic, look for a 404/429 in the log before touching the code.
 - **Changing a default in `server/settings.py` is not enough.** `data/settings.json`
   overrides it, so an existing file keeps the old value for ever. Bump
   `SETTINGS_VERSION` and add an entry to `MIGRATIONS` for the version you are

@@ -32,6 +32,14 @@ class TestAngles(unittest.TestCase):
     def test_combine_scores_takes_worse(self):
         self.assertAlmostEqual(angles.combine_scores(0.9, 0.4), 0.4)
 
+    def test_head_pitch_is_positive_when_looking_down(self):
+        # eye level with the ear
+        self.assertAlmostEqual(angles.head_pitch((150, 100), (100, 100)), 0.0, places=3)
+        # eye below the ear -> looking down
+        self.assertGreater(angles.head_pitch((150, 140), (100, 100)), 30.0)
+        # eye above the ear -> never reads as "down"
+        self.assertLessEqual(angles.head_pitch((150, 60), (100, 100)), 0.0)
+
     def test_ema_smoothing(self):
         ema = angles.Ema(alpha=0.2)
         self.assertAlmostEqual(ema.update(0.0), 0.0)

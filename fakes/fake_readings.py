@@ -74,6 +74,8 @@ def scripted_readings(
                         "torso_drift": None,
                         "slouch_part": None,
                         "head_down_deg": None,
+                        "head_ref_deg": None,
+                        "phone_delta_deg": None,
                         "hands_up": False,
                         "phone": False,
                         "phone_seconds": 0.0,
@@ -103,6 +105,7 @@ def scripted_readings(
                         part = "torso"
                     else:
                         part = "even"
+                    head_down = round(52.0 + rng.uniform(-3.0, 3.0), 1) if phone else round(rng.uniform(2.0, 9.0), 1)
                     reading = {
                         "ts": ts,
                         "person": True,
@@ -116,7 +119,9 @@ def scripted_readings(
                         "neck_drift": round(max(0.0, neck_drift), 2),
                         "torso_drift": round(max(0.0, torso_drift), 2),
                         "slouch_part": part,
-                        "head_down_deg": round(52.0 + rng.uniform(-3.0, 3.0), 1) if phone else round(rng.uniform(2.0, 9.0), 1),
+                        "head_down_deg": head_down,
+                        "head_ref_deg": 6.0,
+                        "phone_delta_deg": round(head_down - 6.0, 1),
                         "hands_up": phone,
                         "phone": phone,
                         "phone_seconds": round(elapsed, 1) if phone else 0.0,

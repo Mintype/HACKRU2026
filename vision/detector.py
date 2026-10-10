@@ -27,7 +27,8 @@ class PostureDetector:
         seated_delay: float = 2.0,
         standup_delay: float = 1.0,
         min_visibility: float = 0.3,
-        phone_pitch_threshold: float = 40.0,
+        phone_pitch_delta: float = 20.0,
+        phone_pitch_fallback: float = 45.0,
         phone_delay: float = 1.5,
     ):
         self.landmarker = landmarker
@@ -36,7 +37,8 @@ class PostureDetector:
         self.seated_delay = float(seated_delay)
         self.standup_delay = float(standup_delay)
         self.min_visibility = float(min_visibility)
-        self.phone_pitch_threshold = float(phone_pitch_threshold)
+        self.phone_pitch_delta = float(phone_pitch_delta)
+        self.phone_pitch_fallback = float(phone_pitch_fallback)
         self.phone_delay = float(phone_delay)
 
         self.baseline = dict(DEFAULT_BASELINE)
@@ -48,6 +50,11 @@ class PostureDetector:
         self._away_since: Optional[float] = None
         self._hip_ref = None
         self._phone_since: Optional[float] = None
+        #: Head tilt recorded during calibration, so "looking down" is measured
+        #: against this person and this camera rather than a guessed angle.
+        self.head_down_baseline: Optional[float] = None
+        self._head_calib_until: Optional[float] = None
+        self._head_samples: list = []
 
     # -- baseline ---------------------------------------------------------
     def set_baseline(self, neck: float, torso: float) -> None:
@@ -55,6 +62,24 @@ class PostureDetector:
         self.calibrated = True
         # Calibration is a step change: don't let the old average linger.
         self._ema.reset()
+
+    def start_head_calibration(self, ts: float, duration: float) -> None:
+        """Record the head tilt of "sitting up straight" for a few seconds.
+
+        Without this the phone rule would need an absolute angle, which depends
+        on the camera height, the chair and the person. Relative to a measured
+        level it needs no guessing.
+        """
+        self._head_calib_until = float(ts) + max(0.5, float(duration))
+        self._head_samples = []
+        self.head_down_baseline = None
+        self._phone_since = None
+
+    def _finish_head_calibration(self, ts: float) -> None:
+        if self._head_samples:
+            self.head_down_baseline = sum(self._head_samples) / len(self._head_samples)
+        self._head_calib_until = None
+        self._head_samples = []
 
     # -- per-frame --------------------------------------------------------
     def process(self, frame, ts: Optional[float] = None) -> Dict[str, object]:
@@ -81,6 +106,11 @@ class PostureDetector:
         eye = landmarks.get("eye")
         wrist = landmarks.get("wrist")
         head_down = angles.head_pitch(eye, ear) if eye is not None and eye[2] >= self.min_visibility else None
+        if head_down is not None and self._head_calib_until is not None:
+            if ts <= self._head_calib_until:
+                self._head_samples.append(head_down)
+            else:
+                self._finish_head_calibration(ts)
         # Hands off the lap: the classic holding-a-phone pose, shown for tuning.
         hands_up = bool(wrist is not None and wrist[2] >= self.min_visibility and wrist[1] < hip[1])
         phone = self._update_phone(ts, head_down)
@@ -95,6 +125,14 @@ class PostureDetector:
         }
         reading["side"] = landmarks.get("side", "right")
         reading["head_down_deg"] = round(head_down, 1) if head_down is not None else None
+        reading["head_ref_deg"] = (
+            round(self.head_down_baseline, 1) if self.head_down_baseline is not None else None
+        )
+        reading["phone_delta_deg"] = (
+            round(head_down - self.head_down_baseline, 1)
+            if head_down is not None and self.head_down_baseline is not None
+            else None
+        )
         reading["hands_up"] = hands_up
         reading["phone"] = phone
         reading["phone_seconds"] = (
@@ -105,11 +143,16 @@ class PostureDetector:
     def _update_phone(self, ts: float, head_down: Optional[float]) -> bool:
         """Sustained head-down: what a phone, a lap or a keyboard all look like.
 
-        Held for ``phone_delay`` so that a glance down does not count. This is a
-        heuristic, not object detection, so the threshold is exposed as a setting
-        and the raw ``head_down_deg`` is shown on the Debug panel to tune it.
+        Measured against the head tilt recorded during calibration, so it needs
+        no guessed angle: looking down is ``phone_pitch_delta`` degrees of extra
+        tilt past level. ``phone_pitch_fallback`` is used only until a reference
+        has been measured.
         """
-        looking_down = head_down is not None and head_down >= self.phone_pitch_threshold
+        if self.head_down_baseline is not None:
+            threshold = self.head_down_baseline + self.phone_pitch_delta
+        else:
+            threshold = self.phone_pitch_fallback
+        looking_down = head_down is not None and head_down >= threshold
         if not looking_down:
             self._phone_since = None
             return False
@@ -168,6 +211,8 @@ class PostureDetector:
                 "torso_drift": None,
                 "slouch_part": None,
                 "head_down_deg": None,
+                "head_ref_deg": None,
+                "phone_delta_deg": None,
                 "hands_up": False,
                 "phone": False,
                 "phone_seconds": 0.0,
@@ -204,6 +249,8 @@ class PostureDetector:
             "torso_drift": round(torso_drift, 2),
             "slouch_part": part,
             "head_down_deg": None,
+            "head_ref_deg": None,
+            "phone_delta_deg": None,
             "hands_up": False,
             "phone": False,
             "phone_seconds": 0.0,
