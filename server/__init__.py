@@ -6,7 +6,6 @@ from .state_machine import (
     GOOD,
     ROASTED,
     SLOUCHING,
-    WARNED,
     PostureStateMachine,
     StateMachineConfig,
 )
@@ -16,7 +15,6 @@ __all__ = [
     "CALIBRATING",
     "GOOD",
     "SLOUCHING",
-    "WARNED",
     "ROASTED",
     "PostureStateMachine",
     "StateMachineConfig",

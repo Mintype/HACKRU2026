@@ -7,13 +7,12 @@ States and thresholds follow the build guide::
 
     away -> (seated ~2 s) -> calibrating -> good
     good -> slouching (score < 0.7)
-    slouching -> warned (10 s)
-    warned -> roasted (30 s, if no cooldown is active)
+    slouching -> roasted (10 s, if no cooldown is active)
     any -> good again after ~2 s of good posture (debounced)
 
 Events (the machine -> voice / website contract)::
 
-    session_start, calibrated, good, warn, roast_due, session_end
+    session_start, calibrated, good, roast_due, session_end
 
 ``roast_due`` carries the session context used to write escalating roasts::
 
@@ -31,18 +30,16 @@ AWAY = "away"
 CALIBRATING = "calibrating"
 GOOD = "good"
 SLOUCHING = "slouching"
-WARNED = "warned"
 ROASTED = "roasted"
 
-STATES = (AWAY, CALIBRATING, GOOD, SLOUCHING, WARNED, ROASTED)
+STATES = (AWAY, CALIBRATING, GOOD, SLOUCHING, ROASTED)
 
 
 @dataclass
 class StateMachineConfig:
     """Live-tunable thresholds (the website edits these)."""
 
-    warn_seconds: float = 10.0
-    roast_seconds: float = 30.0
+    roast_seconds: float = 10.0
     cooldown_seconds: float = 90.0
     good_debounce_seconds: float = 2.0
     calibration_seconds: float = 5.0
@@ -66,7 +63,6 @@ class PostureStateMachine:
         self.good_since: Optional[float] = None
         self.bad_since: Optional[float] = None
         self.hysteresis_slouch = False
-        self.warned = False
         self.roasted = False
 
         self.slouch_count = 0
@@ -222,7 +218,6 @@ class PostureStateMachine:
 
         if self.slouch_since is None:
             self.slouch_since = ts
-            self.warned = False
             self.roasted = False
             self.slouch_count += 1
             self.worst_neck_angle = neck
@@ -250,23 +245,6 @@ class PostureStateMachine:
                 self.bad_since = ts
         else:
             self.bad_since = None
-
-        if elapsed >= self.config.warn_seconds and not self.warned:
-            self.warned = True
-            self._transition(ts, WARNED, events)
-            events.append(
-                {
-                    "event": "warn",
-                    "ts": ts,
-                    "slouch_seconds": round(elapsed, 1),
-                    "slouch_count": self.slouch_count,
-                    "session_minutes": self._session_minutes(ts),
-                    "worst_neck_angle": round(self.worst_neck_angle, 1),
-                    "worst_torso_angle": round(self.worst_torso_angle, 1),
-                    "slouch_part": self.slouch_part,
-                    "state": WARNED,
-                }
-            )
 
         # Cooldown blocks roasts, not tracking: the state still updates.
         fired = False
@@ -311,7 +289,7 @@ class PostureStateMachine:
         if self.good_since is None:
             self.good_since = ts
         # Debounce the return to good so a brief sit-up cannot dodge the roast.
-        if self.state in (SLOUCHING, WARNED, ROASTED) and (ts - self.good_since) >= self.config.good_debounce_seconds:
+        if self.state in (SLOUCHING, ROASTED) and (ts - self.good_since) >= self.config.good_debounce_seconds:
             self._reset_episode()
             self._transition(ts, GOOD, events)
             events.append(
@@ -327,7 +305,6 @@ class PostureStateMachine:
 
     def _reset_episode(self) -> None:
         self.slouch_since = None
-        self.warned = False
         self.roasted = False
         self.hysteresis_slouch = False
         self.bad_since = None

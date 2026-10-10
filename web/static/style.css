@@ -119,7 +119,6 @@ html, body {
 .state-calibrating { color: var(--cal); }
 .state-good        { color: var(--good); }
 .state-slouching   { color: var(--warn); }
-.state-warned      { color: #dda15e; }
 .state-roasted     { color: var(--bad); }
 .offline           { color: var(--warn); }
 

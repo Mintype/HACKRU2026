@@ -133,8 +133,7 @@ events. Its whole vocabulary is six states:
 | `away` | no person, or not seated | seated for ~2 s → a session starts |
 | `calibrating` | capturing the upright baseline | baseline saved |
 | `good` | score above the upper threshold | score drops below the lower threshold |
-| `slouching` | score below the lower threshold | good again, or the warn timer elapses |
-| `warned` | slouching for `warn_seconds` | good again, or the roast timer elapses |
+| `slouching` | score below the lower threshold | good again, or the roast timer elapses |
 | `roasted` | a roast was just played | good again (after the debounce) |
 
 Hysteresis stops the state flickering: it **enters** slouching below
@@ -225,15 +224,16 @@ cooldown:
 | **bad posture** | score below `bad_score_threshold` held for `bad_score_seconds` | 0.45 for 3 s |
 
 ```
-sit down ──2s─▶ seated ──5s─▶ calibrated ──▶ slouch ──▶ warn ──▶ ROAST
-                                             (<0.70)   +10s     +30s
+sit down ──2s─▶ seated ──5s─▶ calibrated ──▶ slouch ──▶ ROAST
+                                             (<0.70)    +10s
                                              ──── deep slouch (<0.45) for 3s ──▶ ROAST immediately
 ```
 
-`warn` at `warn_seconds`, a roast at `roast_seconds`, then `cooldown_seconds`
-before another. Because the score trigger is deliberately faster, a *steep*
-slouch can roast **before** the 10-second warning — that is expected, not a bug.
-Set `bad_score_threshold` to `0` to use only the sustained timer.
+There is no warning stage: the first sign of slouching is the website turning
+amber, and a roast follows at `roast_seconds`. Then `cooldown_seconds` before
+another. Because the score trigger is deliberately faster, a *steep* slouch roasts
+after ~3 s rather than waiting the full 10 — that is expected, not a bug. Set
+`bad_score_threshold` to `0` to use only the sustained timer.
 
 Check the real numbers instead of guessing:
 
@@ -247,12 +247,19 @@ An example run at defaults:
 ```
 t=  3.0s  session_start
 t=  8.1s  calibrated
-t= 20.7s  roast_due   reason=bad_posture  slouch#1  part=neck  score=0.04
-t= 25.9s  warn        slouch#1  part=neck
-t=121.3s  roast_due   reason=bad_posture  slouch#3  part=neck   (+100.6s since the last roast)
+t= 20.7s  roast_due   reason=bad_posture       slouch#1  part=neck  score=0.04
+t=121.3s  roast_due   reason=bad_posture       slouch#3  part=neck   (+100.6s since the last roast)
 ```
 
-**Events.** The state machine emits `session_start`, `calibrated`, `warn`, `good`,
+A deep slouch trips the score trigger; a *moderate* one (score between the lower
+threshold and 0.45) waits out the timer:
+
+```
+t=  5.1s  calibrated
+t= 15.3s  roast_due   reason=sustained_slouch  slouch#1  part=neck  score=0.55
+```
+
+**Events.** The state machine emits `session_start`, `calibrated`, `good`,
 `roast_due`, `session_end`, plus a `state` event on every transition.
 
 ```json
@@ -272,8 +279,7 @@ Everything in this section is editable at runtime on the website under
 
 | Setting | Default | Range | Meaning |
 | ------- | ------- | ----- | ------- |
-| `warn_seconds` | `10` | 1–600 | Continuous slouching before the website turns yellow (`warn`). |
-| `roast_seconds` | `30` | 2–3600 | Continuous slouching before a roast (the *sustained* trigger). Reset by `good_debounce_seconds` of good posture. |
+| `roast_seconds` | `10` | 2–3600 | Continuous slouching before a roast (the *sustained* trigger). Reset by `good_debounce_seconds` of good posture. |
 | `cooldown_seconds` | `90` | 0–3600 | Minimum gap between two roasts. Blocks the *audio*, not the tracking — the state, the chart and the website keep updating. |
 | `good_debounce_seconds` | `2` | 0–60 | How long good posture must hold before the slouch episode is considered over. Stops a brief sit-up from dodging a roast. |
 | `calibration_seconds` | `5` | 1–60 | Length of the upright baseline capture at the start of a session (or when *Calibrate* is pressed). |
@@ -400,7 +406,7 @@ offender does not sound like a first slip.
 | Flag | Meaning |
 | ---- | ------- |
 | `--simulate` / `--fake` | Scripted readings + synthetic feed. No camera, no MediaPipe needed. |
-| `--demo` | Short thresholds for a fast demo: warn 5 s, roast 10 s, cooldown 15 s, calibration 3 s, pool 2/tier. Applied in memory, not saved. |
+| `--demo` | Short thresholds for a fast demo: roast 10 s, cooldown 15 s, calibration 3 s, pool 2/tier. Applied in memory, not saved. |
 | `--preview` | Standalone OpenCV window instead of the website. Best way to aim the camera. |
 | `--video FILE` | Run the real detector against a recording instead of the webcam. |
 | `--camera N` | Camera index. Remembered in settings, so plain `run.py` reuses it. |
@@ -420,7 +426,7 @@ offender does not sound like a first slip.
 | ------ | ----- | ------- |
 | GET | `/` | The website. |
 | GET | `/video_feed` | Live annotated MJPEG stream. |
-| GET | `/events` | Server-sent events. Message kinds: `reading` (~2/s), `event` (state changes, warn, roast_due), `roast` (a clip was chosen), `settings`, `calibrating`. |
+| GET | `/events` | Server-sent events. Message kinds: `reading` (~2/s), `event` (state changes, roast_due), `roast` (a clip was chosen), `settings`, `calibrating`. |
 | GET | `/api/stats` | Current session stats plus the live state, reading and settings. |
 | GET | `/api/history` | Readings for the chart, plus roast markers. |
 | GET | `/api/roasts?limit=N` | The quote ledger (default 3, max 50). |
@@ -506,7 +512,7 @@ Rebooting should bring the website back by itself within a minute.
 | Symptom | Likely cause | Fix |
 | ------- | ------------ | --- |
 | State stays `away`, nothing ever fires | nobody detected, or detected but not seated | check the System panel's **Detection** row; make sure the whole head and hip are in frame and the thigh reads as horizontal |
-| A roast never plays | the triggers need 30 s of *continuous* slouching (or a deep slouch for 3 s) | set **Roast (s)** low, or run `run.py --demo`, and watch the pill go yellow then red |
+| A roast never plays | the sustained trigger needs 10 s of *continuous* slouching (or a deep slouch for 3 s) | set **Roast (s)** low, or run `run.py --demo`, and watch the pill go amber then red |
 | The voice sounds robotic | the local engine, not ElevenLabs | check the System panel's **Voice** row; add `ELEVENLABS_API_KEY`, or run `--test-voice` to see which engine answered |
 | Voices change between roasts | a pool filled by two engines, or old cached clips | set **Voice** to one engine (which clears the pool), and delete `data/roasts/` to re-voice everything |
 | Roasts repeat | the hand-written fallback pool is finite | add a Gemini key so roasts are written fresh; check `data/insults.txt` |

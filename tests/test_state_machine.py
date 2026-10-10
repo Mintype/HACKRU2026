@@ -7,7 +7,6 @@ from server.state_machine import (
     GOOD,
     ROASTED,
     SLOUCHING,
-    WARNED,
     PostureStateMachine,
     StateMachineConfig,
 )
@@ -74,39 +73,35 @@ class TestStateMachine(unittest.TestCase):
         self.assertAlmostEqual(baseline["neck"], 12.0, places=6)
         self.assertAlmostEqual(baseline["torso"], 4.0, places=6)
 
-    def test_warn_then_roast_timing(self):
+    def test_slouching_then_roast_timing(self):
         start = with_session(self.machine)
         self.assertEqual(self.machine.state, GOOD)
 
-        events = []
-        events += feed(self.machine, start, 10, 0.5)
+        events = feed(self.machine, start, 10, 0.5)
         self.assertEqual(self.machine.state, SLOUCHING)
-        self.assertNotIn("warn", event_names(events))
+        self.assertNotIn("roast_due", event_names(events))
 
         events = feed(self.machine, start + 10, 1, 0.5)
-        self.assertIn("warn", event_names(events))
-        self.assertEqual(self.machine.state, WARNED)
-
-        events = []
-        events += feed(self.machine, start + 11, 19, 0.5)
-        self.assertNotIn("roast_due", event_names(events))
-        events += feed(self.machine, start + 30, 1, 0.5)
         due = [e for e in events if e["event"] == "roast_due"]
         self.assertEqual(len(due), 1)
         self.assertEqual(self.machine.state, ROASTED)
+        self.assertEqual(due[0]["reason"], "sustained_slouch")
         self.assertEqual(due[0]["slouch_count"], 1)
-        self.assertGreaterEqual(due[0]["slouch_seconds"], 30.0)
+        self.assertGreaterEqual(due[0]["slouch_seconds"], 10.0)
+        # there is no warning stage any more
+        self.assertNotIn("warn", event_names(events))
 
     def test_good_debounce_blocks_dodging(self):
         start = with_session(self.machine)
-        feed(self.machine, start, 20, 0.5)  # slouching
-        self.assertEqual(self.machine.state, WARNED)
+        feed(self.machine, start, 5, 0.5)  # slouching, 5 s in
+        self.assertEqual(self.machine.state, SLOUCHING)
 
         # Only 1 second of good posture: must NOT reset the slouch timer.
-        feed(self.machine, start + 20, 1, 0.95)
-        self.assertEqual(self.machine.state, WARNED)
+        feed(self.machine, start + 5, 1, 0.95)
+        self.assertEqual(self.machine.state, SLOUCHING)
+
         # Back to slouching; the episode continues, so the roast is still due.
-        events = feed(self.machine, start + 21, 12, 0.5)
+        events = feed(self.machine, start + 6, 10, 0.5)
         self.assertIn("roast_due", event_names(events))
 
     def test_recovery_after_two_good_seconds(self):
@@ -120,20 +115,20 @@ class TestStateMachine(unittest.TestCase):
 
     def test_cooldown_blocks_repeat_roasts(self):
         start = with_session(self.machine)
-        first = feed(self.machine, start, 31, 0.5)
+        first = feed(self.machine, start, 11, 0.5)
         due = [e for e in first if e["event"] == "roast_due"]
         self.assertEqual(len(due), 1)
         first_roast_ts = due[0]["ts"]
 
         # Recover, then slouch again while the cooldown is still active.
-        feed(self.machine, start + 31, 3, 0.95)
+        feed(self.machine, start + 11, 3, 0.95)
         self.assertEqual(self.machine.state, GOOD)
 
-        events = feed(self.machine, start + 34, 60, 0.5)
+        events = feed(self.machine, start + 14, 60, 0.5)
         early = [e for e in events if e["event"] == "roast_due"]
         self.assertEqual(early, [])  # still inside the 90 s cooldown
 
-        events = feed(self.machine, start + 94, 40, 0.5)
+        events = feed(self.machine, start + 74, 40, 0.5)
         later = [e for e in events if e["event"] == "roast_due"]
         self.assertEqual(len(later), 1)
         self.assertGreaterEqual(later[0]["ts"], first_roast_ts + self.cfg.cooldown_seconds)
@@ -181,7 +176,7 @@ class TestStateMachine(unittest.TestCase):
 
     def test_roast_due_names_the_failing_part(self):
         start = with_session(self.machine)
-        events = feed(self.machine, start, 31, 0.5, neck=45.0, torso=6.0, part="neck")
+        events = feed(self.machine, start, 11, 0.5, neck=45.0, torso=6.0, part="neck")
         due = [e for e in events if e["event"] == "roast_due"][0]
         self.assertEqual(due["slouch_part"], "neck")
         self.assertEqual(due["worst_neck_angle"], 45.0)
@@ -233,7 +228,7 @@ class TestStateMachine(unittest.TestCase):
         snap = self.machine.snapshot(start + 15)
         for key in ("state", "slouch_count", "roasts_due", "worst_neck_angle", "cooldown_remaining"):
             self.assertIn(key, snap)
-        self.assertEqual(snap["state"], WARNED)
+        self.assertEqual(snap["state"], ROASTED)
         self.assertGreater(snap["slouch_seconds"], 0)
 
 

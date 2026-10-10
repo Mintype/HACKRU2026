@@ -15,8 +15,7 @@ from .state_machine import StateMachineConfig
 
 DEFAULTS: Dict[str, Any] = {
     # state machine
-    "warn_seconds": 10.0,
-    "roast_seconds": 30.0,
+    "roast_seconds": 10.0,
     "cooldown_seconds": 90.0,
     "good_debounce_seconds": 2.0,
     "calibration_seconds": 5.0,
@@ -43,7 +42,6 @@ DEFAULTS: Dict[str, Any] = {
 }
 
 BOUNDS: Dict[str, tuple] = {
-    "warn_seconds": (1.0, 600.0),
     "roast_seconds": (2.0, 3600.0),
     "cooldown_seconds": (0.0, 3600.0),
     "good_debounce_seconds": (0.0, 60.0),
@@ -150,7 +148,6 @@ class Settings:
     def apply_to(self, machine_config: StateMachineConfig) -> None:
         """Copy live-tunable values onto the running state machine config."""
         mapping = (
-            "warn_seconds",
             "roast_seconds",
             "cooldown_seconds",
             "good_debounce_seconds",

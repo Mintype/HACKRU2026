@@ -38,21 +38,20 @@ Two triggers, either can fire, both gated by the same `cooldown_seconds`:
 2. **bad posture** — score below `bad_score_threshold` (~0.45) held for
    `bad_score_seconds` (~3 s), firing without waiting out the timer
 
-`away` (no person, or not seated) is **never** roasted. `warn` fires at
-`warn_seconds` (~10 s). See the timeline for the numbers rather than guessing:
+`away` (no person, or not seated) is **never** roasted. There is no warning
+stage — slouching turns the website amber, and the roast lands at
+`roast_seconds`. See the timeline for the numbers rather than guessing:
 
 ```bash
 python .pi/skills/posture-coach-vision/scripts/roast_timeline.py
+python .pi/skills/posture-coach-vision/scripts/roast_timeline.py --profile moderate --seconds 60
 python .pi/skills/posture-coach-vision/scripts/roast_timeline.py --profile bad --cooldown 20
-python .pi/skills/posture-coach-vision/scripts/roast_timeline.py --warn 5 --roast 10 --cooldown 15
 ```
 
-One consequence worth knowing: with the default `bad_score_threshold` (0.45) a
-steep slouch can fire `roast_due` **before** `warn` (the timeline shows roast at
-~21 s against warn at ~26 s). That is the score trigger being deliberately faster
-than the 10 s warn, not a bug — raise `bad_score_seconds` or lower
-`bad_score_threshold` if you want the warning first, or set the threshold to 0 to
-use only the sustained-slouch timer.
+`--profile moderate` matters: a deep slouch trips the score trigger after ~3 s, so
+only a *moderate* slouch (score between `lower_threshold` and
+`bad_score_threshold`) exercises the sustained timer. Set the threshold to 0 to
+disable the score trigger and use only the timer.
 
 ## Sit-down detection
 

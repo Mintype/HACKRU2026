@@ -103,7 +103,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--preview", action="store_true",
                         help="open a standalone preview window instead of the website")
     parser.add_argument("--demo", action="store_true",
-                        help="short thresholds (warn 5s, roast 10s, cooldown 15s) so the whole cycle is visible fast")
+                        help="short thresholds (roast 10s, cooldown 15s) so the whole cycle is visible fast")
     parser.add_argument("--video", type=str, default=None, help="use a video file instead of the webcam")
     parser.add_argument("--model", type=str, default=None, choices=["lite", "full", "heavy"],
                         help="MediaPipe pose model (default lite on the Pi)")
@@ -176,7 +176,7 @@ def preview_loop(coach) -> int:
                 if kind == "roast":
                     print(f"  ROAST  -> {event.get('text')}")
                 elif kind == "event" and event.get("event") in {
-                    "session_start", "calibrated", "warn", "good", "session_end",
+                    "session_start", "calibrated", "good", "session_end",
                 }:
                     print(f"  [{event.get('event')}] state={event.get('state')}")
                 event = coach.broker.drain(queue, timeout=0)
@@ -271,7 +271,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         settings_path=args.settings,
         settings_overrides=(
             {
-                "warn_seconds": 5,
                 "roast_seconds": 10,
                 "cooldown_seconds": 15,
                 "calibration_seconds": 3,
@@ -283,7 +282,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     coach = app.coach
     if args.demo:
-        print("  demo   : warn 5s / roast 10s / cooldown 15s (not saved unless you press Save)")
+        print("  demo   : roast 10s / cooldown 15s (not saved unless you press Save)")
 
     if coach.simulate:
         mode = "SIMULATED feed"

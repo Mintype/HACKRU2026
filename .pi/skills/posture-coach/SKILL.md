@@ -18,7 +18,7 @@ Gemini/ElevenLabs roast plays on a Nest while Flask serves a fullscreen browser 
 ```bash
 python run.py                  # real webcam; auto-relaunches into .venv
 python run.py --simulate       # scripted readings + synthetic stick-figure feed, no camera
-python run.py --demo           # short thresholds (warn 5s, roast 10s) so the cycle is visible fast
+python run.py --demo           # short thresholds (roast 10s) so the cycle is visible fast
 python run.py --preview        # standalone OpenCV window, no browser (good for aiming the camera)
 python run.py --list-cameras   # probe camera indices (Windows: DirectShow)
 python run.py --test-voice "Sit up."   # voice one line now; reports which engine spoke
@@ -59,7 +59,7 @@ Extra keys the rest of the system relies on: `slouch_part` (`neck`/`torso`/`even
  "session_minutes": 23, "worst_neck_angle": 41, "slouch_part": "neck"}
 ```
 
-Other events: `session_start`, `calibrated`, `warn`, `good`, `session_end`, `state`.
+Other events: `session_start`, `calibrated`, `good`, `session_end`, `state`.
 
 ## Gotchas that have already cost time
 

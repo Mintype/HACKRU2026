@@ -70,9 +70,9 @@ def main() -> int:
 
     applied = check(
         "POST /api/settings",
-        client.post("/api/settings", json={"warn_seconds": 7, "nice_mode": True}),
+        client.post("/api/settings", json={"roast_seconds": 7, "nice_mode": True}),
     ).get_json()
-    assert applied["applied"]["warn_seconds"] == 7.0, applied
+    assert applied["applied"]["roast_seconds"] == 7.0, applied
 
     roast = check("POST /api/test-roast", client.post("/api/test-roast")).get_json()
     assert roast["ok"] and roast["text"], roast

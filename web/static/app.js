@@ -29,7 +29,6 @@
     calibrating: "state-calibrating",
     good: "state-good",
     slouching: "state-slouching",
-    warned: "state-warned",
     roasted: "state-roasted",
   };
   const STATE_COLOR = {
@@ -37,7 +36,6 @@
     calibrating: "#86a9d4",
     good: "#82c08e",
     slouching: "#d8b25c",
-    warned: "#dda15e",
     roasted: "#d98080",
   };
 
@@ -717,7 +715,7 @@
 
   function fillSettings(settings) {
     if (!settings) return;
-    ["warn_seconds", "roast_seconds", "cooldown_seconds", "delta_angle", "bad_score_threshold", "live_api_cooldown_seconds"].forEach((key) => {
+    ["roast_seconds", "cooldown_seconds", "delta_angle", "bad_score_threshold", "live_api_cooldown_seconds"].forEach((key) => {
       const input = $("settings-form").elements[key];
       if (input && settings[key] !== undefined) input.value = settings[key];
     });
@@ -786,7 +784,6 @@
       ev.preventDefault();
       const form = $("settings-form");
       const payload = {
-        warn_seconds: Number(form.elements["warn_seconds"].value),
         roast_seconds: Number(form.elements["roast_seconds"].value),
         cooldown_seconds: Number(form.elements["cooldown_seconds"].value),
         delta_angle: Number(form.elements["delta_angle"].value),

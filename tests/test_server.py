@@ -49,9 +49,9 @@ class TestFakeReadings(unittest.TestCase):
         names = [e["event"] for e in events]
         self.assertIn("session_start", names)
         self.assertIn("calibrated", names)
-        self.assertIn("warn", names)
         self.assertIn("roast_due", names)
-        self.assertEqual(names.count("warn"), 3)
+        # there is no warning stage any more
+        self.assertNotIn("warn", names)
         self.assertEqual(machine.slouch_count, 3)
         self.assertEqual(machine.state, "good")
 
@@ -152,8 +152,8 @@ class TestSettings(unittest.TestCase):
 
     def test_update_validates_and_persists(self):
         settings = Settings(path=self.path)
-        applied = settings.update({"warn_seconds": 12, "roast_seconds": "45", "audio_route": "cast", "unknown": 1})
-        self.assertEqual(applied["warn_seconds"], 12.0)
+        applied = settings.update({"cooldown_seconds": 12, "roast_seconds": "45", "audio_route": "cast", "unknown": 1})
+        self.assertEqual(applied["cooldown_seconds"], 12.0)
         self.assertEqual(applied["roast_seconds"], 45.0)
         self.assertEqual(applied["audio_route"], "cast")
         self.assertNotIn("unknown", applied)
@@ -164,8 +164,8 @@ class TestSettings(unittest.TestCase):
 
     def test_bounds_and_enum_rejection(self):
         settings = Settings(path=self.path)
-        settings.update({"warn_seconds": -5, "audio_route": "nonsense", "model": "gigantic"})
-        self.assertGreaterEqual(settings.get("warn_seconds"), 1.0)
+        settings.update({"cooldown_seconds": -5, "audio_route": "nonsense", "model": "gigantic"})
+        self.assertGreaterEqual(settings.get("cooldown_seconds"), 0.0)
         self.assertEqual(settings.get("audio_route"), "bluetooth")
         self.assertEqual(settings.get("model"), "lite")
 
@@ -190,10 +190,10 @@ class TestSettings(unittest.TestCase):
 
     def test_apply_to_machine_config(self):
         settings = Settings(path=self.path)
-        settings.update({"warn_seconds": 4, "roast_seconds": 9, "lower_threshold": 0.6})
+        settings.update({"cooldown_seconds": 4, "roast_seconds": 9, "lower_threshold": 0.6})
         cfg = StateMachineConfig()
         settings.apply_to(cfg)
-        self.assertEqual(cfg.warn_seconds, 4.0)
+        self.assertEqual(cfg.cooldown_seconds, 4.0)
         self.assertEqual(cfg.roast_seconds, 9.0)
         self.assertEqual(cfg.lower_threshold, 0.6)
 
