@@ -102,6 +102,11 @@ class RoastPool(threading.Thread):
                     out[key] = out.get(key, 0) + 1
             return out
 
+    def texts(self) -> List[str]:
+        """Texts of every ready clip, so new lines never duplicate them."""
+        with self._lock:
+            return [clip.text for bucket in self._buckets.values() for clip in bucket]
+
     def clear(self) -> int:
         """Drop every ready clip (used when the voice mode changes)."""
         with self._lock:
@@ -161,15 +166,16 @@ class RoastPool(threading.Thread):
                 text = (item or {}).get("text")
                 if not text:
                     continue
+                item_tier = str(item.get("tier") or tier)
                 path = None
                 try:
-                    path = self.synthesize(text)
+                    path = self.synthesize(text, item_tier)
                 except Exception as exc:
                     self.failures += 1
                     log.warning("TTS failed for %r: %s", text, exc)
                 clip = Clip(
                     text=text,
-                    tier=str(item.get("tier") or tier),
+                    tier=item_tier,
                     path=path,
                     source=str(item.get("source") or "gemini"),
                     voice=(self.voice_of(path) if self.voice_of else None),

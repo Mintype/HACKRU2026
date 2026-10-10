@@ -14,7 +14,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 from . import wavutil
 
@@ -44,10 +44,63 @@ def quota_backoff_seconds(message: str, default: float = 3600.0) -> float:
     return max(60.0, min(delay, MAX_BACKOFF_SECONDS))
 
 
-DEFAULT_STYLE = (
-    "Speak like a dramatic sports commentator who is deeply disappointed in "
-    "someone's posture: punchy, playful, PG."
-)
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+VOICE_PROMPT_FILE = "voice.txt"
+
+#: Used when voice/prompts/voice.txt is missing or empty.
+DEFAULT_VOICE_PROMPT = """\
+You are the voice of a posture-coaching webcam. You say one short line out loud
+to someone who is slouching in front of other people.
+
+Delivery: natural and human. Commit to the mood. Do not read punctuation aloud,
+do not announce the line, do not add anything before or after it. Never mention
+appearance, body, identity or ability. Keep it PG.
+
+[mood mild]
+Dry and amused, like a friend who has seen this before.
+
+[mood medium]
+Theatrical and mock-grand, like a sports commentator narrating a disaster.
+
+[mood spicy]
+Exasperated coach at the end of their rope. Full commitment, still PG.
+
+[mood nice]
+Warm and genuinely pleased. Sincere, never sarcastic.
+"""
+
+
+def _parse_voice_prompt(raw: str) -> Tuple[str, Dict[str, str]]:
+    """Split a voice prompt into the shared base and its ``[mood x]`` sections."""
+    base: List[str] = []
+    moods: Dict[str, List[str]] = {}
+    current: Optional[str] = None
+    for line in (raw or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[mood ") and stripped.endswith("]"):
+            current = stripped[len("[mood ") : -1].strip().lower()
+            moods.setdefault(current, [])
+            continue
+        if current is None:
+            base.append(line)
+        else:
+            moods[current].append(line)
+    return (
+        "\n".join(base).strip(),
+        {key: "\n".join(value).strip() for key, value in moods.items() if "\n".join(value).strip()},
+    )
+
+
+def load_voice_prompt() -> Tuple[str, Dict[str, str]]:
+    """Read the delivery prompt + moods, so the persona is editable without code."""
+    try:
+        raw = (PROMPTS_DIR / VOICE_PROMPT_FILE).read_text(encoding="utf-8")
+    except OSError:
+        return _parse_voice_prompt(DEFAULT_VOICE_PROMPT)
+    base, moods = _parse_voice_prompt(raw)
+    if not base:
+        return _parse_voice_prompt(DEFAULT_VOICE_PROMPT)
+    return base, moods
 
 
 class GeminiTTS:
@@ -56,15 +109,29 @@ class GeminiTTS:
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         voice: Optional[str] = None,
-        style: str = DEFAULT_STYLE,
+        style: Optional[str] = None,
+        default_mood: str = "medium",
     ):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY") or ""
         self.model = model or os.environ.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
         self.voice = voice or os.environ.get("GEMINI_TTS_VOICE", "Kore")
-        self.style = style
+        #: Overrides the shared part of voice/prompts/voice.txt when set.
+        self.style = style or os.environ.get("GEMINI_TTS_STYLE") or ""
+        self.default_mood = default_mood
         self._client = None
         self.last_error: Optional[str] = None
         self._disabled_until = 0.0
+
+    def style_for(self, tier: Optional[str] = None) -> str:
+        """Delivery prompt for a tier: shared base plus that tier's mood.
+
+        Read from voice/prompts/voice.txt on each call, so the persona can be
+        tuned while the app is running.
+        """
+        base, moods = load_voice_prompt()
+        base = self.style or base
+        mood = moods.get(str(tier or "").lower()) or moods.get(self.default_mood) or ""
+        return f"{base}\n\n{mood}".strip() if mood else base
 
     @property
     def available(self) -> bool:
@@ -86,7 +153,7 @@ class GeminiTTS:
             self._client = genai.Client(api_key=self.api_key)
         return self._client
 
-    def synthesize(self, text: str, out_path: str | Path) -> bool:
+    def synthesize(self, text: str, out_path: str | Path, tier: Optional[str] = None) -> bool:
         if not text.strip():
             return False
         if not self.available:
@@ -96,7 +163,7 @@ class GeminiTTS:
             self.last_error = f"quota backoff, {int(self.backoff_remaining // 60)} min left"
             return False
         try:
-            pcm, sample_rate, channels = self._call(text)
+            pcm, sample_rate, channels = self._call(text, self.style_for(tier))
             if not pcm:
                 self.last_error = "empty audio response"
                 return False
@@ -118,11 +185,11 @@ class GeminiTTS:
                 log.warning("Gemini TTS failed (%s); falling back to local TTS", message)
             return False
 
-    def _call(self, text: str):
+    def _call(self, text: str, style: str):
         from google.genai import types
 
         client = self._get_client()
-        prompt = f"{self.style}\n\nSay exactly this, nothing else:\n{text}"
+        prompt = f"{style}\n\nSay exactly this, nothing else:\n{text}"
 
         speech_config = None
         try:

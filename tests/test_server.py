@@ -145,7 +145,7 @@ class TestRoastPool(unittest.TestCase):
         def text_source(tier, count):
             return [{"text": next(texts), "tier": tier} for _ in range(count)]
 
-        pool = RoastPool(text_source=text_source, synthesize=lambda text: None, size=3, tiers=("mild",), log_fn=lambda *_: None)
+        pool = RoastPool(text_source=text_source, synthesize=lambda text, tier=None: None, size=3, tiers=("mild",), log_fn=lambda *_: None)
         pool.refill_once()
         self.assertEqual(pool.counts()["mild"], 3)
         clip = pool.take("mild")
@@ -156,7 +156,7 @@ class TestRoastPool(unittest.TestCase):
     def test_take_any_prefers_a_non_empty_bucket(self):
         pool = RoastPool(
             text_source=lambda tier, count: [{"text": f"{tier} line", "tier": tier} for _ in range(count)],
-            synthesize=lambda text: None,
+            synthesize=lambda text, tier=None: None,
             size=2,
             tiers=("mild", "spicy"),
             log_fn=lambda *_: None,
@@ -168,7 +168,7 @@ class TestRoastPool(unittest.TestCase):
     def test_pool_reports_voice_mix_and_can_be_cleared(self):
         pool = RoastPool(
             text_source=lambda tier, count: [{"text": f"{tier} {i}", "tier": tier} for i in range(count)],
-            synthesize=lambda text: f"/tmp/{text}.wav",
+            synthesize=lambda text, tier=None: f"/tmp/{text}.wav",
             voice_of=lambda path: "gemini",
             size=2,
             tiers=("mild",),
@@ -178,6 +178,17 @@ class TestRoastPool(unittest.TestCase):
         self.assertEqual(pool.voice_counts(), {"gemini": 2})
         self.assertEqual(pool.clear(), 2)
         self.assertEqual(pool.voice_counts(), {})
+
+    def test_pool_exposes_ready_texts(self):
+        pool = RoastPool(
+            text_source=lambda tier, count: [{"text": f"{tier} line {i}", "tier": tier} for i in range(count)],
+            synthesize=lambda text, tier=None: None,
+            size=2,
+            tiers=("mild",),
+            log_fn=lambda *_: None,
+        )
+        pool.refill_once()
+        self.assertEqual(sorted(pool.texts()), ["mild line 0", "mild line 1"])
 
 
 if __name__ == "__main__":

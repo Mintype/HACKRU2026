@@ -652,6 +652,7 @@
     const voiceCell = $("sys-voice");
     voiceCell.textContent = (voice.tts_mode || "auto") + (mix ? ` \u00b7 ${mix}` : "");
     voiceCell.className = kinds.length > 1 ? "warn" : "";
+    $("sys-used").textContent = String(voice.insults_used ?? 0);
     $("sys-pool").textContent = `${pool.ready ?? 0}/${pool.target ?? 0}`;
   }
 

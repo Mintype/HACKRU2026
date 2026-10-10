@@ -29,7 +29,12 @@ ESCALATE
 SESSION CONTEXT (use only if it makes the line funnier)
 {{CONTEXT}}
 
-ALREADY USED — do not reuse or paraphrase
+ORIGINALITY
+Every line must be brand new. The list below is everything already said — never
+reuse, reword or lightly paraphrase any of it. If nothing new comes to mind,
+change the angle completely rather than remixing an old line.
+
+ALREADY SAID — banned
 {{EXCLUDE}}
 
 TIER FOR THIS BATCH

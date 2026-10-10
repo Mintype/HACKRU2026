@@ -192,8 +192,27 @@ Both are templates with `{{TOKEN}}` placeholders (`{{CONTEXT}}`, `{{EXCLUDE}}`,
 `voice/gemini_text.py:build_prompt`. Plain string replacement is used rather
 than `str.format`, so the JSON example braces in the templates stay literal.
 If a file is missing or empty the built-in defaults are used, so a deleted file
-can never break the app. Hand-written fallbacks live in `voice/roasts.py`, and
-`{n}` in a fallback line is replaced with the session's slouch count.
+can never break the app. Hand-written fallbacks live in `voice/roasts.py`.
+
+The **delivery** for the spoken voice is a third file,
+`voice/prompts/voice.txt`: a shared base plus `[mood mild|medium|spicy|nice]`
+sections. The tier of an insult picks the mood, so a repeat offender does not
+sound like a first slip. It is re-read on each clip, so it can be tuned while
+the app runs.
+
+### Never repeat
+
+Every insult that is actually said is appended to **`data/insults.txt`**, one per
+line — human-readable and hand-editable. That file is the never-repeat list:
+
+- its most recent lines are passed to Gemini as banned in the prompt
+- the hand-written fallbacks skip anything in it
+- the pool will not queue a line that is already in it or already queued
+- `validate()` drops any generated line that matches, whatever the model returns
+
+The hand-written pool is finite, so once every fallback has been used it may
+start repeating rather than saying nothing at all. The System panel shows how
+many insults have been used so far.
 
 ### Audio routes
 

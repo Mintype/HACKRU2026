@@ -16,6 +16,8 @@ DATA_DIR = Path(os.environ.get("POSTURE_DATA_DIR") or (BASE_DIR / "data"))
 ROAST_DIR = DATA_DIR / "roasts"
 DB_PATH = DATA_DIR / "posture.db"
 SETTINGS_PATH = DATA_DIR / "settings.json"
+#: Every insult we have actually said, one per line — the never-repeat list.
+INSULTS_PATH = DATA_DIR / "insults.txt"
 
 # MediaPipe ``.task`` model files are downloaded here on first use.
 MODELS_DIR = BASE_DIR / "models"

@@ -161,7 +161,7 @@ def build_prompt(
     tier_key = "nice" if nice else tier
 
     context_text = "\n".join(_context_lines(context)) or "- First slouch; no session history yet."
-    exclude_text = "\n".join(f"- {line}" for line in list(exclude)[:8]) or "- (nothing yet)"
+    exclude_text = "\n".join(f"- {line}" for line in list(exclude)[:25]) or "- (nothing yet)"
 
     return (
         template.replace("{{COUNT}}", str(int(count)))

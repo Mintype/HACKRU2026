@@ -205,7 +205,7 @@ class TestGeminiTTSQuotaBackoff(unittest.TestCase):
         tts = GeminiTTS(api_key="fake-key")
         calls = {"n": 0}
 
-        def boom(text):
+        def boom(text, style=None):
             calls["n"] += 1
             raise RuntimeError("429 RESOURCE_EXHAUSTED ... 'retryDelay': '14287s'")
 
@@ -246,7 +246,7 @@ class TestVoiceMode(unittest.TestCase):
         def __init__(self, ready=True):
             self.ready = ready
 
-        def synthesize(self, text, path):
+        def synthesize(self, text, path, tier=None):
             pathlib.Path(path).write_bytes(b"RIFF....")
             return True
 
@@ -325,6 +325,109 @@ class TestLocalVoiceSelection(unittest.TestCase):
         tts.engine = "sapi"
         script = " ".join(tts._command("Sit up.", pathlib.Path("/tmp/x.wav")))
         self.assertNotIn("SelectVoice", script)
+
+
+class TestInsultLog(unittest.TestCase):
+    """data/insults.txt — the never-repeat list."""
+
+    def test_records_dedupes_and_limits(self):
+        from voice.insults import InsultLog
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "insults.txt"
+            log = InsultLog(path=path)
+            self.assertEqual(log.count, 0)
+            self.assertTrue(log.add("Sit up."))
+            self.assertFalse(log.add("  sit   UP.  "))  # same line, different spacing/case
+            self.assertTrue(log.add("Sit tall."))
+            self.assertEqual(log.count, 2)
+            self.assertEqual(log.used(), ["Sit up.", "Sit tall."])
+            self.assertEqual(log.used(limit=1), ["Sit tall."])
+            self.assertTrue(log.has("SIT UP."))
+            self.assertFalse(log.has("never said this"))
+            self.assertEqual(InsultLog(path=path).count, 2)  # survives a restart
+
+    def test_delivered_insults_are_recorded_and_excluded(self):
+        from voice.insults import InsultLog
+        from voice.pool import Clip
+        from voice.service import RoastService
+
+        class Player:
+            route = "off"
+
+            def play_clip(self, clip):
+                return True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            service = RoastService(player=Player(), context_provider=lambda: {})
+            service.insults = InsultLog(path=pathlib.Path(tmp) / "insults.txt")
+            service._deliver(Clip(text="Sit up, you comma.", tier="mild"), {})
+            self.assertEqual(service.insults.count, 1)
+            self.assertIn("Sit up, you comma.", service._exclude_list())
+            service._deliver(Clip(text="SIT UP, YOU COMMA.", tier="mild"), {})
+            self.assertEqual(service.insults.count, 1)
+
+
+class TestOriginality(unittest.TestCase):
+    def test_fallbacks_skip_lines_already_said(self):
+        said = roasts.MILD[:9]
+        batch = roasts.fallback_batch(count=1, tier="mild", exclude=said)
+        self.assertNotIn(batch[0]["text"], said)
+
+    def test_fallbacks_degrade_rather_than_go_silent(self):
+        # The hand-written pool is finite; once every line is used it may repeat
+        # rather than say nothing at all.
+        batch = roasts.fallback_batch(count=3, tier="mild", exclude=roasts.MILD)
+        self.assertEqual(len(batch), 3)
+
+    def test_prompt_bans_everything_already_said(self):
+        # Callers pass the exclude list most-relevant-first, so the newest lines
+        # are the ones shown to the model.
+        said = [f"old line {i}" for i in range(30)]
+        prompt = build_prompt(count=3, tier="mild", exclude=list(reversed(said)))
+        self.assertIn("brand new", prompt)
+        self.assertIn("old line 29", prompt)
+
+    def test_exclude_list_puts_the_newest_first(self):
+        from voice.insults import InsultLog
+        from voice.pool import Clip
+        from voice.service import RoastService
+
+        class Player:
+            route = "off"
+
+            def play_clip(self, clip):
+                return True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            service = RoastService(player=Player(), context_provider=lambda: {})
+            service.insults = InsultLog(path=pathlib.Path(tmp) / "insults.txt")
+            service._deliver(Clip(text="first thing said", tier="mild"), {})
+            service._deliver(Clip(text="second thing said", tier="mild"), {})
+            self.assertEqual(service._exclude_list()[0], "second thing said")
+
+
+class TestVoiceMood(unittest.TestCase):
+    """The Gemini voice should carry the mood of the tier."""
+
+    def test_voice_prompt_defines_moods_and_they_differ(self):
+        from voice.gemini_tts import GeminiTTS, load_voice_prompt
+
+        base, moods = load_voice_prompt()
+        self.assertTrue(base)
+        for mood in ("mild", "medium", "spicy", "nice"):
+            self.assertIn(mood, moods)
+        tts = GeminiTTS(api_key="fake")
+        self.assertNotEqual(tts.style_for("mild"), tts.style_for("spicy"))
+        self.assertIn(moods["mild"], tts.style_for("mild"))
+        self.assertIn(base, tts.style_for("spicy"))
+
+    def test_unknown_tier_uses_the_default_mood(self):
+        from voice.gemini_tts import GeminiTTS
+
+        tts = GeminiTTS(api_key="fake")
+        self.assertEqual(tts.style_for(None), tts.style_for("medium"))
+        self.assertEqual(tts.style_for("nonsense"), tts.style_for("medium"))
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ from typing import Callable, Deque, Dict, List, Optional
 import config
 from .gemini_text import RoastWriter
 from .gemini_tts import GeminiTTS
+from .insults import InsultLog
 from .player import AudioPlayer
 from .pool import Clip, RoastPool
 from .roasts import TIERS, fallback_batch, fallback_one, tier_for
@@ -52,6 +53,7 @@ class RoastService:
         self.log = log_fn
 
         self._recent: Deque[str] = deque(maxlen=10)
+        self.insults = InsultLog()
         self._lock = threading.Lock()
         self.pool = RoastPool(
             text_source=self._text_source,
@@ -97,6 +99,8 @@ class RoastService:
             return None
         with self._lock:
             self._recent.append(clip.text)
+        # Record it so it is never said again.
+        self.insults.add(clip.text)
         if self.on_played is not None:
             try:
                 self.on_played(clip, event)
@@ -107,9 +111,31 @@ class RoastService:
     def _nice(self) -> bool:
         return bool(self.settings.get("nice_mode")) if self.settings is not None else False
 
-    def _fallback_text(self, tier: str) -> str:
+    def _exclude_list(self) -> List[str]:
+        """Everything we must not say again, most relevant first.
+
+        Ordering matters because only the head of this list is shown to the
+        model: the lines just said, then what is already queued, then older
+        history.
+        """
         with self._lock:
-            exclude = list(self._recent)
+            recent = list(self._recent)
+        candidates = (
+            list(reversed(recent))
+            + list(self.pool.texts())
+            + list(reversed(self.insults.used(limit=self.insults.max_exclude)))
+        )
+        seen = set()
+        out: List[str] = []
+        for text in candidates:
+            key = " ".join((text or "").lower().split())
+            if key and key not in seen:
+                seen.add(key)
+                out.append(text)
+        return out
+
+    def _fallback_text(self, tier: str) -> str:
+        exclude = self._exclude_list()
         nice = self._nice()
         context = self.context_provider() or {}
         text = fallback_one(
@@ -134,8 +160,7 @@ class RoastService:
 
     def _text_source(self, tier: str, count: int) -> List[Dict]:
         nice = self._nice()
-        with self._lock:
-            exclude = list(self._recent)
+        exclude = self._exclude_list()
         context = self.context_provider() or {}
         items: List[Dict] = []
         if self.writer.available:
@@ -177,7 +202,7 @@ class RoastService:
             return "local"
         return "unknown"
 
-    def _synthesize(self, text: str) -> Optional[str]:
+    def _synthesize(self, text: str, tier: Optional[str] = None) -> Optional[str]:
         """Voice one line, honouring the voice-mode setting.
 
         The voice is part of the filename, so the cache is voice-aware and a
@@ -195,7 +220,7 @@ class RoastService:
             if voice == "gemini":
                 if mode == "local" or not self.tts.ready:
                     return None
-                return str(path) if self.tts.synthesize(text, path) else None
+                return str(path) if self.tts.synthesize(text, path, tier) else None
             if mode == "gemini" or not self.local_tts.available:
                 return None
             return str(path) if self.local_tts.synthesize(text, path) else None
@@ -218,6 +243,8 @@ class RoastService:
             "gemini_tts_error": self.tts.last_error,
             "local_tts": self.local_tts.engine,
             "tts_mode": self._tts_mode(),
+            "insults_used": self.insults.count,
+            "insults_file": str(self.insults.path),
             "nice_mode": self._nice(),
             "recent": recent[-5:],
             "pool": self.pool.status(),
