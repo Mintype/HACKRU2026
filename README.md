@@ -1,95 +1,560 @@
-# Posture Coach 🪑
+# Posture Coach
 
-Watches you from the side with a webcam on a Raspberry Pi 5, and when you slouch
-too long the Google Nest roasts you with an insult written by Gemini.
+A side-mounted webcam watches how you sit. A Raspberry Pi measures your neck and
+torso angles, a debounced state machine decides when a slouch has gone on long
+enough to deserve an insult, and a speaker in the room says it out loud. Flask
+serves a fullscreen browser HUD so anyone can watch, tune it and press buttons.
 
-Everything runs on the Pi: one Python process with a few background threads.
-The computer only opens the website in a browser.
+Nothing runs in the browser: the Pi does the capture, the maths, the decision and
+the audio. The website is only a window onto it.
 
 ```
-camera → MediaPipe landmarks → neck/torso angles → score → debounced state machine
-      → pre-generated Gemini roast (pool) → Bluetooth to the Nest
-      → Flask website: live annotated feed, stats, chart, controls
+side webcam ─▶ MediaPipe landmarks ─▶ angles ─▶ score ─▶ state machine
+                                                             │
+                                          roast_due ─────────┘
+                                              │
+                          ElevenLabs voice ───┴─── local voice (offline)
+                                              │
+                                    Nest over Bluetooth (or Wi-Fi cast)
 ```
-
-Gemini is deliberately **kept out of the real-time path**: roasts are written
-and voiced ahead of time into a pool, so a slouch gets audio in about a second
-instead of waiting on an API call. If Gemini or the network is down, hand-written
-roasts plus a local TTS engine keep the demo alive.
 
 ---
 
 ## Contents
 
-- [Quick start (laptop, no hardware)](#quick-start-laptop-no-hardware)
-- [Repository layout](#repository-layout)
+- [Quick start](#quick-start)
 - [How it works](#how-it-works)
-- [Interface contracts](#interface-contracts)
-- [HTTP API](#http-api)
-- [Configuration](#configuration)
-- [Running modes](#running-modes)
-- [Fakes for parallel development](#fakes-for-parallel-development)
+- [When a roast fires](#when-a-roast-fires)
+- [Reference: every number and option](#reference-every-number-and-option)
+  - [Timing and threshold settings](#timing-and-threshold-settings)
+  - [Vision parameters](#vision-parameters)
+  - [Voice parameters](#voice-parameters)
+  - [Playback parameters](#playback-parameters)
+  - [Server and website parameters](#server-and-website-parameters)
+  - [Environment variables](#environment-variables)
+  - [Command line](#command-line)
+  - [HTTP API](#http-api)
+  - [Files and data](#files-and-data)
+- [The website](#the-website)
 - [Raspberry Pi setup](#raspberry-pi-setup)
-- [Run on boot (systemd)](#run-on-boot-systemd)
-- [Testing](#testing)
-- [Tuning and troubleshooting](#tuning-and-troubleshooting)
-- [Team roles and day plan](#team-roles-and-day-plan)
-- [Demo script and pitch](#demo-script-and-pitch)
-- [Stretch goals](#stretch-goals)
+- [Troubleshooting](#troubleshooting)
+- [Testing checklist](#testing-checklist)
+- [Team roles and the pitch](#team-roles-and-the-pitch)
+- [Repository layout](#repository-layout)
 
 ---
 
-## Quick start (laptop, no hardware)
-
-The whole system runs in **simulation mode**: scripted readings drive the state
-machine and a synthetic stick-figure feed stands in for the camera. No webcam,
-no Nest required.
-
-**One-time setup** (creates `.venv` and installs everything, including MediaPipe):
+## Quick start
 
 ```bash
-./setup.sh        # macOS / Linux / Pi
-setup.bat         # Windows
+./setup.sh                 # macOS / Linux / Pi   (Windows: setup.bat)
+./run.sh --simulate --no-audio    # Windows: run.bat --simulate --no-audio
 ```
 
-**Run it:**
+Then open <http://localhost:5000>. `--simulate` needs no camera: scripted readings
+drive the state machine and a synthetic stick figure stands in for the video.
+
+Or use the venv directly — `run.py` re-execs itself inside `.venv`, so a bare
+`python run.py` works even when `python` points at another interpreter:
 
 ```bash
-./run.sh --simulate --no-audio     # macOS / Linux / Pi
-run.bat --simulate --no-audio      # Windows
+python run.py                  # real webcam
+python run.py --demo           # short thresholds, whole cycle visible in ~30 s
+python run.py --preview        # standalone OpenCV window, no browser
+python run.py --help
 ```
 
-Or activate the venv and use `python run.py` directly:
+Tests need no camera, no network and no keys:
 
 ```bash
-source .venv/bin/activate              # Windows: .venv\Scripts\activate
-python run.py --simulate --no-audio
+python -m unittest discover -s tests -t .   # unit tests
+python -m tests.smoke                        # boots the real Flask app, hits every route
 ```
 
-> `run.py` also detects when it was started with a Python that lacks the
-dependencies and automatically relaunches itself using `.venv`, so a bare
-`python run.py` works even if `.venv` is not activated. (`setup.bat` / `run.bat`
-are just thin wrappers around the same thing.)
+---
 
-Open <http://localhost:5000>. Within a few seconds you will see the person
-"arrive", calibrate, slouch, get warned, and get roasted — with the caption,
-chart and stats all updating live.
+## How it works
 
-To use the real vision code against a recorded clip:
+### 1. Vision — frames to readings
+
+`vision/` opens the camera at 640×480 and runs each frame through MediaPipe's pose
+landmarker (the **lite** model on the Pi). It picks whichever body side has the
+higher summed landmark visibility, because the far side is partly a guess, and
+converts MediaPipe's normalised `0..1` coordinates into **pixels before measuring
+anything** — a non-square frame otherwise distorts the angles. Image `y` grows
+downward, so "up" is `y_below - y_above`.
+
+| Angle | Points | Meaning |
+| ----- | ------ | ------- |
+| **neck** | ear → shoulder | forward-head posture; grows as the head juts forward |
+| **torso** | shoulder → hip | hunching or leaning |
+| **thigh** | hip → knee, from **horizontal** | small ⇒ seated |
+
+Each angle becomes a score against the person's *own* calibrated upright posture:
+
+```
+score  = 1 − min(1, max(0, θ − θ₀) / Δθ)      θ = angle, θ₀ = baseline, Δθ = tolerance
+```
+
+The **lower** of the neck and torso scores wins, so either kind of slouch counts.
+The result is smoothed with an exponential moving average so one noisy frame
+cannot trigger anything. Everything downstream sees only this reading — never a
+frame:
+
+```json
+{
+  "ts": 1760101234.5, "person": true, "seated": true,
+  "neck_angle": 18.4, "torso_angle": 7.1, "score": 0.86,
+  "neck_drift": 6.4, "torso_drift": 3.1, "slouch_part": "neck"
+}
+```
+
+`slouch_part` says which part is giving way (`neck`, `torso` or `even`), and the
+drifts are how far each angle has moved past the baseline. The roasts use them.
+
+### 2. Calibration and sit-down detection
+
+A session can only start when someone is detected **and seated**. Seated means the
+thigh is within `seated_threshold` of horizontal for `seated_delay`. If a desk
+hides the knee, the detector falls back to "person present + hip parked in one
+place + torso upright enough".
+
+Once seated, `calibration_seconds` of sitting up straight are averaged into the
+baseline (`neck` and `torso`). Without a baseline the code falls back to
+12° / 4°, but a real calibration is what makes the score personal.
+
+### 3. The state machine — when to speak
+
+`server/state_machine.py` owns every decision. It reads only readings, and emits
+events. Its whole vocabulary is six states:
+
+| State | Means | Leaves when |
+| ----- | ----- | ----------- |
+| `away` | no person, or not seated | seated for ~2 s → a session starts |
+| `calibrating` | capturing the upright baseline | baseline saved |
+| `good` | score above the upper threshold | score drops below the lower threshold |
+| `slouching` | score below the lower threshold | good again, or the warn timer elapses |
+| `warned` | slouching for `warn_seconds` | good again, or the roast timer elapses |
+| `roasted` | a roast was just played | good again (after the debounce) |
+
+Hysteresis stops the state flickering: it **enters** slouching below
+`lower_threshold` (0.70) and only **returns** to good above `upper_threshold`
+(0.80). Between those two values nothing changes. Returning to good also requires
+`good_debounce_seconds` (~2 s) of genuinely good posture, so a brief sit-up cannot
+dodge a roast.
+
+Two rules matter more than the rest:
+
+- **The cooldown blocks roasts, not tracking.** During a cooldown the state still
+  updates and the website still turns yellow; only the audio waits.
+- **`away` is never roasted.** Standing up ends the session instead.
+
+### 4. Voice — writing and speaking
+
+Gemini **writes** the insults; ElevenLabs **speaks** them. They are separate jobs
+with separate keys and separate quotas, and the words never touch the browser.
+
+The prompt text lives in files, not code:
+
+| File | Controls |
+| ---- | -------- |
+| `voice/prompts/roast.txt` | normal mode: actually insulting, still PG |
+| `voice/prompts/nice.txt` | nice mode: encouragement |
+
+Both are templates with `{{TOKEN}}` placeholders (`{{CONTEXT}}`, `{{EXCLUDE}}`,
+`{{COUNT}}`, `{{TIER}}`, `{{TIER_BRIEF}}`), filled in with plain string
+replacement rather than `str.format` — the templates contain literal JSON braces.
+Built-in defaults are used if a file is missing, so a deleted file cannot break
+the app.
+
+The **delivery** is not a prompt: ElevenLabs takes `voice_settings`, so the tier
+of an insult maps to stability/style numbers (see the table below).
+
+**Never repeating.** Every insult actually said is appended to
+`data/insults.txt`, one per line. That ledger is enforced in four places:
+
+1. its most recent lines are sent to Gemini as banned in the prompt
+2. `validate()` drops any generated line that matches one already said
+3. the hand-written fallbacks skip lines in it
+4. the pool refuses to queue a line already said, or already queued
+
+Exclusions are ordered most-relevant-first (just played → queued → history),
+because only the head of that list is shown to the model.
+
+### 5. Where a roast comes from
+
+| `roast_source` | Behaviour |
+| -------------- | --------- |
+| `live` (default) | On `roast_due` the Pi asks Gemini for a fresh line right then, on a worker thread so the vision loop never blocks, voices it and plays it. `live_api_cooldown_seconds` rate-limits those calls. |
+| `pool` | A background worker keeps pre-generated clips ready, so playback is instant and the model is never in the real-time path. |
+
+In `live` mode the pool stops refilling, so the two paths never both spend quota.
+Anything that fails falls back to a pooled clip, then a hand-written line.
+
+### 6. Audio playback
+
+`voice/player.py` plays one clip at a time through a **size-1 queue**: if
+something is already playing the new clip is skipped rather than stacked.
+
+1. **Bluetooth** (default route) — the Pi plays to the Nest as a Bluetooth
+   speaker. It reconnects before each clip, because the link drops when idle.
+2. **Wi-Fi cast** (backup) — `pychromecast` tells the Nest to fetch the clip from
+   `/media/roasts/<name>` over the network.
+3. **Local player** — `pw-play`, `paplay`, `aplay` or `ffplay`, whichever exists,
+   which is why a laptop hears roasts through its own speakers.
+
+Every clip gets **0.5 s of leading silence**, because a Bluetooth speaker tends to
+clip the first syllable while the link wakes up. `--no-audio` prints instead.
+
+### 7. The website
+
+Flask serves one page plus an MJPEG video stream and a server-sent-events
+channel. The camera thread encodes each frame **once** and stores the JPEG behind
+a lock; routes only read it, so extra browser tabs cost almost nothing.
+
+---
+
+## When a roast fires
+
+Two independent triggers, either one fires `roast_due`, both gated by the same
+cooldown:
+
+| Trigger | Condition | Default |
+| ------- | --------- | ------- |
+| **sustained slouch** | score below `lower_threshold` for `roast_seconds` | 0.70 for 30 s |
+| **bad posture** | score below `bad_score_threshold` held for `bad_score_seconds` | 0.45 for 3 s |
+
+```
+sit down ──2s─▶ seated ──5s─▶ calibrated ──▶ slouch ──▶ warn ──▶ ROAST
+                                             (<0.70)   +10s     +30s
+                                             ──── deep slouch (<0.45) for 3s ──▶ ROAST immediately
+```
+
+`warn` at `warn_seconds`, a roast at `roast_seconds`, then `cooldown_seconds`
+before another. Because the score trigger is deliberately faster, a *steep*
+slouch can roast **before** the 10-second warning — that is expected, not a bug.
+Set `bad_score_threshold` to `0` to use only the sustained timer.
+
+Check the real numbers instead of guessing:
 
 ```bash
-python run.py --video teammates-slouching.mp4
+python .pi/skills/posture-coach-vision/scripts/roast_timeline.py
+python .pi/skills/posture-coach-vision/scripts/roast_timeline.py --profile bad --cooldown 20
 ```
 
-### Manual install (if you prefer)
+An example run at defaults:
+
+```
+t=  3.0s  session_start
+t=  8.1s  calibrated
+t= 20.7s  roast_due   reason=bad_posture  slouch#1  part=neck  score=0.04
+t= 25.9s  warn        slouch#1  part=neck
+t=121.3s  roast_due   reason=bad_posture  slouch#3  part=neck   (+100.6s since the last roast)
+```
+
+**Events.** The state machine emits `session_start`, `calibrated`, `warn`, `good`,
+`roast_due`, `session_end`, plus a `state` event on every transition.
+
+```json
+{"event": "roast_due", "reason": "bad_posture", "slouch_count": 5,
+ "session_minutes": 23, "worst_neck_angle": 41, "worst_torso_angle": 9,
+ "slouch_part": "neck", "slouch_seconds": 12.6, "score": 0.31}
+```
+
+---
+
+## Reference: every number and option
+
+Everything in this section is editable at runtime on the website under
+**Controls**, and is persisted to `data/settings.json`.
+
+### Timing and threshold settings
+
+| Setting | Default | Range | Meaning |
+| ------- | ------- | ----- | ------- |
+| `warn_seconds` | `10` | 1–600 | Continuous slouching before the website turns yellow (`warn`). |
+| `roast_seconds` | `30` | 2–3600 | Continuous slouching before a roast (the *sustained* trigger). Reset by `good_debounce_seconds` of good posture. |
+| `cooldown_seconds` | `90` | 0–3600 | Minimum gap between two roasts. Blocks the *audio*, not the tracking — the state, the chart and the website keep updating. |
+| `good_debounce_seconds` | `2` | 0–60 | How long good posture must hold before the slouch episode is considered over. Stops a brief sit-up from dodging a roast. |
+| `calibration_seconds` | `5` | 1–60 | Length of the upright baseline capture at the start of a session (or when *Calibrate* is pressed). |
+| `lower_threshold` | `0.70` | 0.05–1.0 | Score **below** this ⇒ slouching. This is the "enter slouch" edge of the hysteresis. |
+| `upper_threshold` | `0.80` | 0.05–1.0 | Score **above** this ⇒ good. Between the two thresholds the state does not change. |
+| `bad_score_threshold` | `0.45` | 0–1.0 | The deep-slouch score that roasts without waiting out `roast_seconds`. `0` disables this trigger. |
+| `bad_score_seconds` | `3` | 0–60 | How long the bad score must hold before that trigger fires, so one noisy frame cannot cost an API call. |
+| `delta_angle` | `20` | 1–60 | Tolerance: how many degrees past the baseline map to a score of `0`. Smaller ⇒ more sensitive. |
+
+### Vision parameters
+
+These are constructor arguments in `vision/detector.py` and `server/camera.py`
+rather than website settings.
+
+| Parameter | Default | Meaning |
+| --------- | ------- | ------- |
+| `DEFAULT_BASELINE` | neck `12°`, torso `4°` | Used only until a calibration happens. |
+| `tolerance` (= `delta_angle`) | `20` | Degrees past the baseline that map to score 0. |
+| `alpha` (EMA) | `0.2` | Score smoothing. Higher reacts faster, lower is steadier. |
+| `seated_threshold` | `30°` | Thigh angle from horizontal below which the person counts as seated. |
+| `seated_delay` | `2 s` | How long that must hold before a session starts, so someone still sitting down is not roasted. |
+| `standup_delay` | `1 s` | How long "not seated" must hold before the state goes `away`. |
+| `min_visibility` | `0.3` | Knee visibility below which the thigh angle is ignored and the desk fallback is used. |
+| `model` | `lite` | MediaPipe pose model: `lite`, `full` or `heavy`. `lite` is the one that keeps 10+ fps on a Pi. |
+| `fps_target` | `10` | Frames per second the vision loop aims for. Posture changes slowly; 5 fps of detection is still enough. |
+| `jpeg_quality` | `70` | JPEG quality for the shared frame that `/video_feed` serves. |
+| `sample_interval` | `1 s` | How often a reading is written to SQLite (sampled, not every frame). |
+| `publish_interval` | `0.5 s` | How often a reading summary is pushed to the browser over SSE. |
+
+### Voice parameters
+
+| Setting | Default | Values | Meaning |
+| ------- | ------- | ------ | ------- |
+| `tts_mode` | `auto` | `auto`, `elevenlabs`, `local` | Which engine speaks. `auto` = ElevenLabs when a key is present, otherwise the local engine. Forcing one keeps the voice consistent and goes **silent** rather than mixing engines. |
+| `roast_source` | `live` | `live`, `pool` | Generate a fresh roast at the moment of the slouch, or play pre-generated clips instantly. |
+| `live_api_cooldown_seconds` | `30` | 0–3600 | Minimum gap between two live API calls, on top of `cooldown_seconds`. Protects the quota if you shorten the roast cooldown. |
+| `roast_pool_size` | `3` | 1–50 | Clips kept ready **per tier** (so 3 × 3 tiers = 9). Only used when `roast_source = pool`. |
+| `nice_mode` | `false` | on/off | Swaps insults for encouragement and uses `prompts/nice.txt`. |
+
+**Escalation tiers** — chosen from the session's slouch count
+(`voice/roasts.py:tier_for`):
+
+| Slouches | Tier | Delivery (ElevenLabs `voice_settings`) |
+| -------- | ---- | -------------------------------------- |
+| 1–3 | `mild` | stability 0.55, similarity 0.75, style 0.15 |
+| 4–6 | `medium` | stability 0.40, similarity 0.75, style 0.35 |
+| 7+ | `spicy` | stability 0.25, similarity 0.80, style 0.60 |
+| nice mode | `nice` | stability 0.65, similarity 0.75, style 0.10 |
+
+Lower stability and higher style make the delivery more animated, so a repeat
+offender does not sound like a first slip.
+
+**ElevenLabs** (`voice/eleven_tts.py`) — the preferred voice:
+
+| Item | Default | Notes |
+| ---- | ------- | ----- |
+| voice | **Sarah** (`EXAVITQu4vr4xnSDxMaL`) | A *premade* voice. Free plans cannot use "library" voices through the API (HTTP 402); if the configured voice is rejected the client lists your account's voices and uses one of those. |
+| model | `eleven_flash_v2_5` | Fast and cheap, which suits one-liners. |
+| output format | `pcm_24000` | 16-bit PCM, so it drops into the same WAV pipeline as everything else. |
+| timeout | `30 s` | Per request. A `422` retries once without the optional `style` setting. |
+
+**Pool and ledger**:
+
+| Item | Default | Meaning |
+| ---- | ------- | ------- |
+| `refill_interval` | `1.5 s` | How often the pool worker tops the buckets up. |
+| `max_batch` | `4` | Most clips generated in one pass, so one refill cannot block for long. |
+| `max_exclude` | `300` | Ledger lines retained as exclusions; the prompt shows the 25 most recent. |
+| `MAX_WORDS` | `14` | Generated lines longer than this are dropped. The prompt asks for 6–12 words. |
+
+### Audio and camera settings
+
+| Setting | Default | Values | Meaning |
+| ------- | ------- | ------ | ------- |
+| `audio_route` | `bluetooth` | `bluetooth`, `cast`, `off` | Where the roast comes out: the Nest over Bluetooth, the Wi-Fi cast backup, or `off` (printed only — what `--no-audio` sets). |
+| `cast_name` | `""` | any device name | The friendly name the Nest advertises to Chromecast, used by the cast backup. |
+| `mirror` | `false` | on/off | Mirrors the camera. Applied in the vision thread **before** the overlay is drawn, so the angle labels stay the right way round. |
+| `camera_index` | `0` | 0–16 | Which camera to open. Set by `--camera N`, which also remembers it for next time. |
+
+### Playback parameters
+
+| Item | Default | Meaning |
+| ---- | ------- | ------- |
+| queue size | `1` | One clip at a time; new clips are **skipped** when busy rather than stacked. |
+| Bluetooth reconnect | checked every `5 s`, reconnected before each clip | Idle links drop; `bluetoothctl connect` is retried when needed. |
+| player command | `pw-play` → `paplay` → `aplay` → `ffplay` | First one found on `PATH` wins; override with `POSTURE_BLUETOOTH_PLAYER`. |
+| command timeout | `45 s` | A stuck player cannot wedge the thread. |
+| leading silence | `0.5 s` | Prepended to every clip. |
+| cast discovery | `6 s`, device wait `8 s`, active wait `12 s` | Timeouts for the Wi-Fi cast backup. |
+
+### Server and website parameters
+
+| Item | Default | Meaning |
+| ---- | ------- | ------- |
+| host / port | `0.0.0.0` / `5000` | `run.py --host/--port`. |
+| Flask threading | on, reloader **off** | The reloader starts the app twice and the second copy cannot open the camera. |
+| SSE keepalive | `15 s` | A comment line is sent when nothing else happens, so proxies do not close the stream. |
+| SSE subscriber cap | `200` queued events | A slow client is dropped rather than stalling the vision thread. |
+| MJPEG loop | `0.02 s` | The feed re-sends the latest JPEG; encoding happens once, in the camera thread. |
+| `/api/roasts` default limit | `3` | Clamped to 1–50. |
+
+### Environment variables
+
+`.env` is git-ignored (`!.env.example` is kept). Copy `.env.example` to start.
+
+| Variable | Default | Meaning |
+| -------- | ------- | ------- |
+| `GEMINI_API_KEY` | — | Lets Gemini **write** the roasts. Without it the hand-written fallbacks are used. |
+| `GEMINI_TEXT_MODEL` | `gemini-2.5-flash` | Text model for writing roasts. |
+| `ELEVENLABS_API_KEY` | — | The voice. Without it, `auto` uses the local engine. |
+| `ELEVENLABS_VOICE_ID` | Sarah | Any voice your plan allows. |
+| `ELEVENLABS_MODEL` | `eleven_flash_v2_5` | ElevenLabs model. |
+| `ELEVENLABS_OUTPUT_FORMAT` | `pcm_24000` | Ask for PCM so it stays in the WAV pipeline. |
+| `NEST_BLUETOOTH_MAC` | — | From `bluetoothctl devices`; enables the Bluetooth route. |
+| `NEST_CAST_NAME` | — | Friendly name for the Wi-Fi cast backup. |
+| `POSTURE_BLUETOOTH_PLAYER` | auto-detected | Force a player, e.g. `paplay`. |
+| `POSTURE_LOCAL_VOICE` | `en` (system default) | Local voice, e.g. `Microsoft Zira Desktop`. |
+| `POSTURE_DISABLE_LOCAL_TTS` | unset | `1` disables the offline voice entirely. |
+| `POSTURE_CAMERA_BACKEND` | `dshow` on Windows | `dshow`, `msmf` or `auto`. |
+| `POSTURE_DATA_DIR` | `./data` | Where the database, clips and ledger live. |
+
+### Command line
+
+| Flag | Meaning |
+| ---- | ------- |
+| `--simulate` / `--fake` | Scripted readings + synthetic feed. No camera, no MediaPipe needed. |
+| `--demo` | Short thresholds for a fast demo: warn 5 s, roast 10 s, cooldown 15 s, calibration 3 s, pool 2/tier. Applied in memory, not saved. |
+| `--preview` | Standalone OpenCV window instead of the website. Best way to aim the camera. |
+| `--video FILE` | Run the real detector against a recording instead of the webcam. |
+| `--camera N` | Camera index. Remembered in settings, so plain `run.py` reuses it. |
+| `--camera-backend NAME` | `auto`, `dshow`, `msmf`, `v4l2`, `avfoundation`. |
+| `--list-cameras` | Probe camera indices, print what works, and exit. |
+| `--list-snapshots` | With the above: save one still per camera to `data/camera-scan/` so you can tell them apart. |
+| `--test-voice [TEXT]` | Voice one line with the configured provider, report which engine spoke, play it, exit. |
+| `--model NAME` | MediaPipe model: `lite` (default), `full`, `heavy`. |
+| `--no-audio` | Print roasts instead of playing them. |
+| `--host` / `--port` | Bind address and port. |
+| `--settings PATH` | Use a different settings file. |
+| `--debug` | Verbose logging. |
+
+### HTTP API
+
+| Method | Route | Purpose |
+| ------ | ----- | ------- |
+| GET | `/` | The website. |
+| GET | `/video_feed` | Live annotated MJPEG stream. |
+| GET | `/events` | Server-sent events. Message kinds: `reading` (~2/s), `event` (state changes, warn, roast_due), `roast` (a clip was chosen), `settings`, `calibrating`. |
+| GET | `/api/stats` | Current session stats plus the live state, reading and settings. |
+| GET | `/api/history` | Readings for the chart, plus roast markers. |
+| GET | `/api/roasts?limit=N` | The quote ledger (default 3, max 50). |
+| GET | `/api/status` | Camera, fps, audio route, voice engines, pool and detector state. |
+| POST | `/api/calibrate` | Start the upright calibration (409 if no session). |
+| POST | `/api/test-roast` | Play a roast immediately (409 if the player is busy). |
+| GET | `/api/settings` | All settings and their allowed values. |
+| POST | `/api/settings` | Update settings live. `tts_mode` also clears the ready pool. |
+| GET | `/media/roasts/<name>` | Serves generated clips — this is what the Nest fetches when casting. |
+| GET | `/healthz` | Liveness probe. |
+
+### Files and data
+
+Everything under `data/` is git-ignored and safe to delete.
+
+| Path | Contents |
+| ---- | -------- |
+| `data/settings.json` | Live settings, saved whenever you press *Save*. |
+| `data/posture.db` | SQLite: sessions, sampled readings, state changes and every roast (with `voice` and `origin`). |
+| `data/insults.txt` | The quote ledger — every insult actually said, one per line. |
+| `data/roasts/*.wav` | Voiced clips, cached per engine: `roast_<text-hash>_<elevenlabs\|local>.wav`. |
+| `data/camera-scan/` | Snapshots from `--list-cameras --list-snapshots`. |
+| `models/*.task` | Downloaded MediaPipe model. |
+
+Because clips are cached by text hash **and** engine, changing the voice does not
+re-voice old clips. Delete `data/roasts/` to have everything re-voiced.
+
+---
+
+## The website
+
+One page, fullscreen. The annotated feed fills the viewport and the UI floats over
+it as translucent panels. Data arrives over SSE, so nothing needs refreshing.
+
+| Panel | Shows |
+| ----- | ----- |
+| **Posture** | live neck and torso angles, the score with its 0.7/0.8 threshold ticks, cooldown. |
+| **Session** | good-posture %, slouches, roasts, longest good streak. |
+| **Score** | the score over the session, with roast markers (resizable). |
+| **Controls** | calibrate, test roast, nice mode, and every setting in the tables above. |
+| **System** | the debugging surface: **Detection** (`person · seated` — the usual reason nothing fires), camera and backend, fps, Nest connection, audio route, the voice engine and its voice, the pool's voice mix, insults used, and the roast source with any API cooldown. |
+
+Panels can be dragged by their title bar, collapsed, hidden and re-added from the
+**Panels** menu; the layout is remembered in the browser. The header buttons are
+*Panels* (**P**), *Mirror* (**M**) and *Fullscreen* (**F**).
+
+---
+
+## Raspberry Pi setup
+
+**Hardware:** Pi 5 with the official 27 W supply (weak supplies throttle and drop
+USB), an active cooler, a 32 GB+ microSD with Raspberry Pi OS 64-bit plus a spare
+card, a USB webcam mounted at shoulder height 1–2 m to the side, a Nest, and a
+phone hotspot or travel router so everything shares one network.
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate                 # Windows: .venv\Scripts\activate
-pip install -r requirements.txt           # Flask, OpenCV, Gemini SDK, cast
-pip install -r requirements-vision.txt    # adds MediaPipe (pose detection)
-python run.py --simulate --no-audio
+sudo apt update
+sudo apt install -y python3-venv python3-dev bluez pulseaudio-utils espeak-ng
+git clone <your-repo> ~/posture-coach && cd ~/posture-coach
+./setup.sh
+cp .env.example .env && nano .env      # add the API keys
+python -c "import mediapipe; print('mediapipe ok')"
 ```
+
+Pair the Nest (do this first — it is the riskiest hardware step):
+
+```bash
+bluetoothctl
+[bluetooth]# scan on
+[bluetooth]# pair AA:BB:CC:DD:EE:FF
+[bluetooth]# trust AA:BB:CC:DD:EE:FF
+[bluetooth]# connect AA:BB:CC:DD:EE:FF
+```
+
+Put that MAC in `NEST_BLUETOOTH_MAC`, set the hostname to `posture`, then run on
+boot with `deploy/posture-coach.service` (`systemctl enable --now posture-coach`).
+Rebooting should bring the website back by itself within a minute.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+| ------- | ------------ | --- |
+| State stays `away`, nothing ever fires | nobody detected, or detected but not seated | check the System panel's **Detection** row; make sure the whole head and hip are in frame and the thigh reads as horizontal |
+| A roast never plays | the triggers need 30 s of *continuous* slouching (or a deep slouch for 3 s) | set **Roast (s)** low, or run `run.py --demo`, and watch the pill go yellow then red |
+| The voice sounds robotic | the local engine, not ElevenLabs | check the System panel's **Voice** row; add `ELEVENLABS_API_KEY`, or run `--test-voice` to see which engine answered |
+| Voices change between roasts | a pool filled by two engines, or old cached clips | set **Voice** to one engine (which clears the pool), and delete `data/roasts/` to re-voice everything |
+| Roasts repeat | the hand-written fallback pool is finite | add a Gemini key so roasts are written fresh; check `data/insults.txt` |
+| Roasts are silent but captions appear | audio route, or the Bluetooth link dropped | try **Voice → Local**, switch the route to cast, and confirm the Nest is paired |
+| Under ~8 fps, laggy overlay | an oversized model | `--model lite`, smaller frames, or detect on every second frame |
+| `could not open camera 0` | another program has it, or the wrong index | `run.py --list-cameras`, then `--camera N` |
+| Page looks stale after an edit | Flask caches the template, and the browser caches CSS/JS | restart the server and hard-refresh (`Ctrl+F5`) |
+| 429 from Gemini | the free TTS tier is ~10 requests/day (Gemini no longer speaks, so this only affects *writing*) | wait, add billing, or rely on the fallback roasts |
+| 402 from ElevenLabs | the configured voice is a paid "library" voice | pick a premade voice, or leave it to the automatic fallback |
+
+---
+
+## Testing checklist
+
+- Each teammate sits, calibrates and slouches — works across body types and chair heights.
+- Test in the venue's lighting, with the camera in its final position.
+- Stand up mid-session: the state goes `away` and nothing is roasted.
+- Disconnect the internet: roasts still play from the pool or the local voice.
+- Turn the Nest's Bluetooth off mid-session: the site shows it, and switching to cast works.
+- Reboot the Pi: the service comes back by itself.
+- Run a 10-minute session end to end without touching the code.
+- Record a backup demo video.
+
+---
+
+## Team roles and the pitch
+
+| Role | Owns | Builds |
+| ---- | ---- | ------ |
+| 1. Vision | `vision/` | landmarks, side selection, angles, sit-down detection, calibration, score, hysteresis |
+| 2. Server | `server/` | Flask, camera thread, MJPEG, state machine, SQLite, SSE, systemd, fake readings |
+| 3. Voice | `voice/` | Bluetooth, the roast prompt and schema, TTS, the pool, the player queue, all fallbacks |
+| 4. Website + demo lead | `web/` | the HUD, controls, settings, the chart, the pitch and the demo script |
+
+Collision rules: one folder per person, commit small and often, only one person
+deploys to the Pi at a time, and contracts change only with everyone's agreement.
+
+**A three-minute pitch.** *Problem:* students hunch over laptops for hours and
+polite reminders are easy to ignore. *Demo:* a judge sits down, the system notices,
+calibrates, they slouch on purpose, and the Nest roasts them while the roast
+appears beside the live angle overlay. *Architecture:* side-view geometry with
+per-user calibration, a debounced state machine, and a pre-generated
+context-aware roast pool. *Next:* posture history, profiles, roast personalities.
+
+Expect these questions: why a side view (it measures real neck and torso angles),
+how false alarms are avoided (calibration, smoothing, hysteresis, the `away`
+state), and what happens without a connection (the pool, the local voice, and the
+hand-written fallbacks).
 
 ---
 
@@ -98,534 +563,37 @@ python run.py --simulate --no-audio
 ```
 .
 ├── run.py                    # entry point / CLI (auto-uses .venv)
-├── run.bat / run.sh          # launchers that use .venv without activation
-├── setup.bat / setup.sh      # one-time dependency install
 ├── config.py                 # paths + .env loader
-├── vision/                   # ROLE 1 — frame -> reading
-│   ├── angles.py             #   pure geometry (no cv2/mediapipe)
+├── vision/                   # frames -> readings
+│   ├── angles.py             #   pure geometry (no cv2/MediaPipe)
 │   ├── landmarks.py          #   MediaPipe pose wrapper
-│   ├── detector.py           #   angles, seated detection, score, overlay
-│   ├── calibrate.py          #   5 s upright baseline
+│   ├── detector.py           #   angles, sit-down detection, score, overlay
+│   ├── calibrate.py          #   upright baseline capture
 │   ├── source.py             #   webcam / video-file sources
 │   └── synthetic.py          #   fake camera feed for --simulate
-├── server/                   # ROLE 2 — Flask, threads, state machine, DB
+├── server/                   # Flask, threads, state machine, DB
 │   ├── app.py                #   app factory + routes
 │   ├── camera.py             #   the vision thread
-│   ├── state_machine.py      #   away/calibrating/good/slouch/warn/roast
+│   ├── state_machine.py      #   the six states and the roast triggers
 │   ├── events.py             #   SSE broker
 │   ├── db.py                 #   SQLite logging + session stats
 │   └── settings.py           #   persisted, live-editable settings
-├── voice/                    # ROLE 3 — Gemini roasts, pool, audio
-│   ├── prompts/              #   editable prompt text: roast.txt, nice.txt
-│   ├── gemini_text.py        #   structured roast batches
-│   ├── eleven_tts.py         #   ElevenLabs voice (preferred)
-│   ├── tts_local.py          #   offline voice
-│   ├── tts_local.py          #   espeak-ng / piper / say / SAPI fallback
+├── voice/                    # writing and speaking
+│   ├── gemini_text.py        #   writes roasts (structured JSON)
+│   ├── eleven_tts.py         #   speaks them (ElevenLabs)
+│   ├── tts_local.py          #   offline voice: espeak/piper/say/SAPI
 │   ├── wavutil.py            #   WAV writing, lead silence, normalise
+│   ├── insults.py            #   the quote ledger (never repeat)
 │   ├── pool.py               #   pre-generated clip pool
-│   ├── player.py             #   Bluetooth + cast playback, one at a time
-│   ├── service.py            #   orchestration + fallbacks
-│   └── roasts.py             #   hand-written fallback roasts
-├── web/                      # ROLE 4 — the website judges see
+│   ├── player.py             #   Bluetooth + cast playback
+│   ├── service.py            #   orchestration, provider order, fallbacks
+│   ├── roasts.py             #   hand-written fallbacks
+│   └── prompts/              #   roast.txt, nice.txt
+├── web/                      # the HUD
 │   ├── index.html
-│   └── static/{app.js,style.css}   # fullscreen feed + draggable glass HUD
-├── fakes/                    # scripted readings to build against
-├── tests/                    # unit tests + HTTP smoke test
-├── deploy/posture-coach.service
-├── requirements*.txt
-└── .env.example
+│   └── static/{app.js,style.css,fonts.css,fonts/}
+├── fakes/fake_readings.py    # scripted readings
+├── tests/                    # unit tests + smoke.py
+├── .pi/skills/               # agent skills for working on this repo
+└── deploy/posture-coach.service
 ```
-
----
-
-## How it works
-
-### One process, a few threads
-
-| Component      | Runs as                     | Job |
-| -------------- | --------------------------- | --- |
-| Camera + vision | background thread          | grab frames, landmarks, angles, overlay |
-| State machine  | called by the vision thread | decides sit-down, good, slouch, away, roast timing |
-| Roast pool     | background thread           | keeps ~9 ready clips per tier, refills from Gemini |
-| Audio player   | background thread + queue   | plays clips on the Nest, one at a time |
-| Flask          | main thread                 | website, video stream, stats, settings |
-| SQLite         | file on the Pi              | sessions, readings, state changes, roasts |
-
-Only one program can open the webcam, so one process is simpler than several.
-The camera thread encodes each frame as JPEG **once** and stores it in a shared
-object behind a lock; Flask routes only read from it, so extra browser tabs cost
-almost nothing.
-
-### Scores, smoothing and hysteresis
-
-MediaPipe normalized coordinates are converted to pixels first (otherwise the
-angles are distorted by the non-square frame). Both angles are measured from
-vertical using `atan2`:
-
-- **neck** = ear→shoulder line (forward head posture)
-- **torso** = shoulder→hip line (hunching/leaning)
-- **thigh** = hip→knee line from horizontal (sit-down detection)
-
-Each angle becomes a score `1 - min(1, max(0, θ - θ₀) / Δθ)` against the
-user's own calibrated baseline, and the **lower** of the two wins. The score is
-smoothed with an EMA (`α = 0.2`) so one noisy frame cannot trigger a roast.
-Thresholds use hysteresis: enter slouching below **0.7**, return to good above
-**0.8**, and require ~2 s of good posture to reset (debounce).
-
-### Escalation
-
-Two triggers — either one can fire a roast:
-
-- **sustained slouch** — slouching for `roast_seconds` (~30 s) → `roast_due`
-- **bad posture** — the score dropping below `bad_score_threshold` (~0.45) and
-  staying there for `bad_score_seconds` (~3 s) → `roast_due` straight away,
-  without waiting out the timer
-
-The event carries a `reason` (`sustained_slouch` or `bad_posture`). A
-`cooldown_seconds` gap (~90 s) applies to both, so a long bad stretch cannot
-spam. The website still turns yellow (`warn`) at ~10 s, and `away` (no person /
-not seated) is never roasted. Set `bad_score_threshold` to `0` to disable the
-score trigger entirely.
-
-### Where a roast comes from
-
-| `roast_source` | Behaviour |
-| -------------- | --------- |
-| `live` (default) | On `roast_due` the Pi asks Gemini for a fresh line at that moment, on a worker thread so the vision loop never blocks, then voices it. `live_api_cooldown_seconds` (~30 s) additionally rate-limits those calls. |
-| `pool` | A background worker keeps pre-generated clips ready, so the roast is instant and the model is never in the real-time path at all. |
-
-In `live` mode the pool stops refilling, so the two paths never both spend the
-Gemini quota. Live is a little slower (network round trip) but never repeats a
-line; the pool is instant but finite.
-
-### Which voice speaks
-
-`tts_mode` (Controls → Voice) picks the engine. `auto` walks this chain and uses
-the first that answers:
-
-| Order | Engine | Notes |
-| ----- | ------ | ----- |
-| 1 | **ElevenLabs** (`ELEVENLABS_API_KEY`) | Preferred: its free tier is ~10k characters/month, which suits these one-liners far better than a per-day request cap. Mood comes from `voice_settings` — lower stability and more style for a repeat offender. |
-| 2 | **Local** | espeak-ng / piper / macOS `say` / Windows SAPI — unlimited and works offline. |
-
-Gemini is used **only for writing** the roasts, never for speaking them.
-
-`elevenlabs` or `local` force a single engine, so the voice stays consistent (a
-forced engine goes quiet rather than mixing in another voice when it has no key).
-Voiced clips are cached per engine — `roast_<hash>_elevenlabs.wav` — so switching
-engine re-voices new lines and leaves old ones alone; clear `data/roasts/` to
-re-voice everything. The default voice is **Sarah**; free plans cannot use
-"library" voices through the API, so a rejected voice makes the client list the
-account's own voices and use one of those.
-
-### Roast prompts
-
-The wording sent to Gemini lives in two editable text files, not in the code:
-
-| File | Mode |
-| ---- | ---- |
-| `voice/prompts/roast.txt` | normal — actually insulting, still PG |
-| `voice/prompts/nice.txt` | nice mode — genuine encouragement |
-
-Both are templates with `{{TOKEN}}` placeholders (`{{CONTEXT}}`, `{{EXCLUDE}}`,
-`{{COUNT}}`, `{{TIER}}`, `{{TIER_BRIEF}}`) filled in by
-`voice/gemini_text.py:build_prompt`. Plain string replacement is used rather
-than `str.format`, so the JSON example braces in the templates stay literal.
-If a file is missing or empty the built-in defaults are used, so a deleted file
-can never break the app. Hand-written fallbacks live in `voice/roasts.py`.
-
-The **delivery** for the spoken voice is not a prompt any more: ElevenLabs takes
-`voice_settings`, so the tier of an insult maps to numbers in
-`voice/eleven_tts.py` (`TIER_SETTINGS`) — stability falls and style rises, so a
-repeat offender does not sound like a first slip.
-
-### Never repeat
-
-Every insult that is actually said is appended to **`data/insults.txt`**, one per
-line — human-readable and hand-editable. There is no on-screen list any more;
-this file *is* the quote ledger, and it is what keeps the roasts original. Its
-most recent lines are passed to Gemini as banned in the prompt, the hand-written
-fallbacks skip anything in it, the pool will not queue a line that is already in
-it or already queued, and `validate()` drops any generated line that matches.
-`GET /api/roasts?limit=N` reads the same ledger if you want to see it.
-
-The hand-written pool is finite, so once every fallback has been used it may
-start repeating rather than saying nothing at all. The System panel shows how
-many insults have been used so far.
-
-### Audio routes
-
-| Route | How | Strength | Weakness |
-| ----- | --- | -------- | -------- |
-| **Bluetooth** (primary) | Pi plays to the Nest as a Bluetooth speaker | matches the design, no network | Linux Bluetooth can drop when idle |
-| **Wi-Fi cast** (backup) | `pychromecast` tells the Nest to play a clip served by Flask | reliable on a shared network | needs the Pi and Nest on one network |
-
-The player reconnects Bluetooth before each clip and falls back to cast
-automatically if Bluetooth playback fails. Switch routes any time on the
-website. Every clip gets ~0.5 s of leading silence so the speaker does not clip
-the first syllable while the link wakes up.
-
----
-
-## Interface contracts
-
-Agreed in hour 0, so all four people can build in parallel against fakes.
-
-**Vision → state machine** — one reading per frame:
-
-```json
-{
-  "ts": 1760101234.5,
-  "person": true,
-  "seated": true,
-  "neck_angle": 18.4,
-  "torso_angle": 7.1,
-  "score": 0.86
-}
-```
-
-Angles are degrees from vertical; `score` is 0–1 where 1 matches the calibrated
-upright posture.
-
-**State machine → voice** — the voice module only reacts to `roast_due`:
-
-```json
-{ "event": "roast_due", "slouch_count": 5, "session_minutes": 23, "worst_neck_angle": 41 }
-```
-
-Other events: `session_start`, `calibrated`, `warn`, `good`, `session_end`.
-
----
-
-## The website (HUD)
-
-The page is a **fullscreen feed with a translucent HUD** on top — closer to an
-instrument overlay than a dashboard. Everything on it is a panel you can move or
-turn off, and the arrangement is remembered in the browser's `localStorage`.
-
-| Panel | Shows |
-| ----- | ----- |
-| **Posture** | live neck/torso angles, score with the 0.7/0.8 threshold ticks, cooldown |
-| **Session** | good %, slouches, roasts, longest good streak |
-| **Score** | score over the session with roast markers (resizable) |
-| **Controls** | calibrate, test roast, nice mode, thresholds and audio route |
-| **System** | camera/backend, fps, Nest, audio route, Gemini text + voice, local TTS, pool |
-
-The top bar carries the state plate (away → good → slouch → warn → roast), the
-session clock and the live rate, then three icon buttons:
-
-- **Panels** (`P`) — checkboxes to add/hide any panel, a **dim** slider for
-  video brightness, and *Reset layout*
-- **Mirror** (`M`) — flips the camera. This is done on the server *before* the
-  pose overlay is drawn, so the angle labels stay readable
-- **Fullscreen** (`F`) — browser fullscreen (`Esc` leaves the panel menu)
-
-There is deliberately no idle "live" badge; the top bar only shows an `offline`
-plate if the event stream actually drops.
-
-Panels are dragged by their title bar and resized from the bottom-right corner
-(Score). A roast pops up as a caption in the lower third for a few seconds.
-Content is pushed over server-sent events, so nothing here needs a refresh.
-
-### Styling
-
-Instrument-like on purpose: hairline borders, 2 px corners, no pill shapes, and
-frosted translucency — every surface (panels, top bar, menus, caption) is
-see-through and blurs the feed behind it. The chrome (labels, numbers, controls)
-is set in **Overpass Mono** and prose (roast captions, hall of shame) in
-**Overpass** — both self-hosted as woff2 in `web/static/fonts/`, so the page
-renders correctly with no internet. Icons are
-[Heroicons](https://heroicons.com) (MIT).
-
-The score chart is coloured by value through a single vertical ramp — green at
-the top, amber at the warn/roast thresholds, red at the bottom — with a matching
-gradient fill under the trace, so the colour of the line *is* the reading.
-
-## HTTP API
-
-| Method | Route | Purpose |
-| ------ | ----- | ------- |
-| GET | `/` | the website |
-| GET | `/video_feed` | live annotated MJPEG stream |
-| GET | `/events` | server-sent events: readings, state changes, roasts |
-| GET | `/api/stats` | current session stats + live snapshot |
-| GET | `/api/history` | readings for the chart (+ roast markers) |
-| GET | `/api/roasts` | the quote ledger — recent roasts (default 3, `?limit=1..50`) |
-| GET | `/api/status` | camera fps, Nest connection, Gemini reachability |
-| POST | `/api/calibrate` | start the 5-second upright calibration |
-| GET | `/api/settings` | thresholds, nice mode, audio route |
-| POST | `/api/settings` | update them (live) |
-| POST | `/api/test-roast` | play a roast right now (demo button) |
-| GET | `/media/roasts/<name>` | serves generated WAVs to the Nest for casting |
-| GET | `/healthz` | liveness probe |
-
----
-
-## Configuration
-
-Copy `.env.example` to `.env` and fill it in. `.env` is git-ignored.
-
-| Variable | Meaning |
-| -------- | ------- |
-| `GEMINI_API_KEY` | from Google AI Studio; without it the app uses fallbacks |
-| `GEMINI_TEXT_MODEL` | text model id (check Google's models page on the day) |
-| `GEMINI_TEXT_MODEL` | text model used to write roasts (Gemini never speaks) |
-| `ELEVENLABS_API_KEY` | the voice; without it `auto` uses the local engine |
-| `ELEVENLABS_VOICE_ID` | voice to use (default Sarah, `EXAVITQu4vr4xnSDxMaL`) |
-| `ELEVENLABS_MODEL` | defaults to `eleven_flash_v2_5` |
-| `NEST_BLUETOOTH_MAC` | from `bluetoothctl devices` |
-| `NEST_CAST_NAME` | friendly name for the Wi-Fi cast backup |
-| `POSTURE_BLUETOOTH_PLAYER` | override player command (`paplay`, `pw-play`, `aplay`) |
-| `POSTURE_CAMERA_BACKEND` | `dshow` (Windows default), `msmf`, `auto` |
-| `POSTURE_DATA_DIR` | where the DB and clips live |
-| `POSTURE_DISABLE_LOCAL_TTS` | set to `1` to disable the local TTS fallback |
-
-Runtime thresholds (warn/roast/cooldown, tolerance, nice mode, audio route) are
-edited on the website and persisted to `data/settings.json`.
-
-> Google's API moves fast: the Python SDK is **`google-genai`** (the older
-> `google-generativeai` package is deprecated). Model IDs are `preview` and
-> change often — pick them from Google's models page on the day.
-
----
-
-## Running modes
-
-```bash
-python run.py                     # real webcam, serves the website
-python run.py --preview           # standalone window (no browser) - good for aiming
-python run.py --list-cameras      # show which camera indices work
-python run.py --simulate          # scripted fake readings + synthetic feed
-python run.py --video clip.mp4    # develop vision against a recording
-python run.py --no-audio          # print roasts instead of playing them
-python run.py --camera 1          # pick a specific camera (remembered)
-python run.py --model full        # MediaPipe pose model (lite/full/heavy)
-python run.py --port 5000 --host 0.0.0.0
-python run.py --debug
-```
-
-The program runs **here** (camera, pose detection, state machine, audio) and the
-website is just its UI — the browser only displays the stream and sends button
-presses. `--preview` skips the server entirely and opens a plain desktop window
-with the annotated feed, which is the easiest way to position the camera.
-
-## Choosing the camera (side view)
-
-This is a **side-view** system: the camera sits at shoulder height, 1–2 m to the
-person's side, roughly level, with the whole head and hip in frame. If the
-laptop's built-in front camera is used instead, the neck/torso angles are
-meaningless — pick the side-mounted camera instead.
-
-```bash
-python run.py --list-cameras                    # index + resolution + speed
-python run.py --list-cameras --list-snapshots   # also save a still per camera
-python run.py --camera 1                        # use index 1
-python run.py --camera 1 --preview              # aim it (q to quit)
-```
-
-`--camera N` is remembered in `data/settings.json`, so afterwards plain
-`python run.py` uses that camera. Open `data/camera-scan/camera_<n>.png` (from
-`--list-snapshots`) to see which physical camera each index is.
-
-On Windows the default backend is **DirectShow** because Media Foundation can
-take ~20 s to open and copes poorly with several cameras. Override with
-`--camera-backend msmf` or `POSTURE_CAMERA_BACKEND=dshow|msmf|auto`.
-
----
-
-## Fakes for parallel development
-
-- **Recorded video as the camera** — `python run.py --video clip.mp4`, or
-  `VideoFileSource` directly. Vision can be built without the Pi.
-- **Fake readings** — `python -m fakes.fake_readings` prints a scripted sequence
-  of good and slouching readings at 1 Hz. The server and website can be built
-  before vision works. `--simulate` uses the same generator.
-- **Fake player** — `--no-audio` (or `audio_route = off`) prints the roast
-  instead of playing it, so the server can be tested without Bluetooth.
-
----
-
-## Raspberry Pi setup
-
-### Hardware
-
-- Raspberry Pi 5 with the **official 27 W USB-C supply** (weak supplies throttle and drop USB)
-- Active cooler (pose detection runs the CPU hard all day)
-- 32 GB+ microSD with Raspberry Pi OS 64-bit, plus a spare card with the same image
-- USB webcam mounted at the side, roughly shoulder height, 1–2 m away
-- Google Nest Mini / Nest Audio, set up in a Google Home account
-- Mobile hotspot or travel router so Pi, computer and Nest share one network
-- Ethernet or keyboard+HDMI for recovery if Wi-Fi setup fails
-
-### Software
-
-```bash
-sudo apt update
-sudo apt install -y python3-venv python3-dev bluez pulseaudio-utils espeak-ng
-
-git clone <your-repo> ~/posture-coach
-cd ~/posture-coach
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-pi.txt        # includes MediaPipe
-cp .env.example .env && nano .env          # add GEMINI_API_KEY, NEST_BLUETOOTH_MAC
-
-python -c "import mediapipe; print('mediapipe ok')"   # find pip problems NOW, not at hour 1
-```
-
-If MediaPipe wheel trouble hits, try piwheels:
-
-```bash
-pip install --extra-index-url https://www.piwheels.org/simple mediapipe
-```
-
-### Bluetooth to the Nest (do this in hour 1 — it is the riskiest step)
-
-```bash
-bluetoothctl
-[bluetooth]# scan on
-[bluetooth]# pair AA:BB:CC:DD:EE:FF
-[bluetooth]# trust AA:BB:CC:DD:EE:FF     # lets the Pi reconnect automatically
-[bluetooth]# connect AA:BB:CC:DD:EE:FF
-[bluetooth]# quit
-```
-
-Put `AA:BB:CC:DD:EE:FF` in `.env` as `NEST_BLUETOOTH_MAC`. Test with a WAV:
-
-```bash
-aplay test.wav      # or: paplay test.wav   (PipeWire default sink)
-```
-
-Then confirm it still plays after 10 minutes of silence — the whole reason the
-player reconnects before every clip.
-
-### Networking
-
-Set a known hostname so the website is always at `http://posture.local:5000`:
-
-```bash
-sudo raspi-config        # System Options -> Hostname -> posture
-```
-
-Enable SSH for every teammate, then run:
-
-```bash
-python run.py --host 0.0.0.0 --port 5000
-```
-
----
-
-## Run on boot (systemd)
-
-```bash
-sudo cp deploy/posture-coach.service /etc/systemd/system/
-sudo nano /etc/systemd/system/posture-coach.service   # fix User / paths if needed
-sudo systemctl daemon-reload
-sudo systemctl enable --now posture-coach
-systemctl status posture-coach
-journalctl -u posture-coach -f
-```
-
-Reboot the Pi: the website should come back by itself within about a minute.
-
----
-
-## Testing
-
-```bash
-python -m unittest discover -s tests -t .   # 50+ unit tests, no hardware needed
-python -m tests.smoke                        # HTTP smoke test in simulation mode
-```
-
-The suite covers the angle math, the full escalation/cooldown/debounce state
-machine, the detector with a stub landmarker, the roast prompt/validation,
-the WAV writer, the pool, the SSE broker, SQLite logging and the scripted
-readings end-to-end. The smoke test boots the real Flask app in simulation mode
-and exercises every route with the test client.
-
-### Testing checklist before judging
-
-- Each teammate sits, calibrates and slouches — works across body types and chair heights
-- Test in the venue's actual lighting with the camera in its final position
-- Stand up mid-session: goes `away`, nothing is roasted
-- Disconnect the Pi's internet: roasts still play from the pool
-- Turn the Nest's Bluetooth off mid-session: the website shows it; cast works
-- Reboot the Pi: the service comes back by itself
-- Run a 10-minute session end to end without touching code
-- Record a backup demo video
-
----
-
-## Tuning and troubleshooting
-
-| Symptom | Likely cause | Fix |
-| ------- | ------------ | --- |
-| Nest silent, roast shows on the site | Bluetooth dropped / not paired | player reconnects automatically; else switch route to Wi-Fi cast |
-| Under ~8 fps, laggy overlay | pose model too heavy | `POSTURE_MODEL=lite`, smaller frames, detect every second frame (5 fps is plenty — posture changes slowly) |
-| Computer can't reach the Pi, cast can't find the Nest | venue Wi-Fi blocks device-to-device traffic | use your own hotspot / travel router from the start |
-| Pool stops refilling | no internet / rate limited | pre-generated clip pool + hand-written roasts + local TTS |
-| Gemini returns empty / off-tone | prompt rejected or too spicy | keep the prompt PG; validation drops bad lines and falls back |
-| Flickering seated state, wild angles | desk hides hips/knees, baggy clothes | raise/angle the camera down; visibility-based fallback handles sit-down |
-| Throttling / random reboots | power or heat | official PSU + active cooler |
-| `address already in use` | second copy running (auto-reloader) | the app disables the reloader on purpose; kill the stale process |
-
-Tune `warn_seconds`, `roast_seconds`, `cooldown_seconds`, `delta_angle`,
-`lower_threshold` and `upper_threshold` live from the website and watch the
-effect on the chart.
-
----
-
-## Team roles and day plan
-
-| Role | Owns | Builds |
-| ---- | ---- | ------ |
-| 1. Vision | `vision/` | landmarks, side selection, angles, sit-down detection, calibration, score, hysteresis |
-| 2. Server | `server/` | Flask app, camera thread, MJPEG, state machine, SQLite, SSE, systemd, fake readings |
-| 3. Voice | `voice/` | Bluetooth to the Nest, Gemini prompt + schema for *writing* roasts, ElevenLabs voice, roast pool, player queue, all fallbacks |
-| 4. Website + demo lead | `web/` | website, controls, settings, live chart, captions, pitch, demo script, backup video |
-
-Rules that keep four people from colliding:
-
-- one folder per person; commit small and often
-- only one person deploys to the Pi at a time — announce it before restarting the service
-- contracts only change with everyone's agreement, announced out loud
-- every two hours, a 5-minute standup: what works, what's blocked, what's next
-
-If a gate slips, take its fallback instead of pushing the schedule — every later
-phase depends on the one before it. Pair up when blocked: vision + server on Pi
-frame rate, voice + website on captions and the test-roast button.
-
----
-
-## Demo script and pitch (~3 minutes)
-
-1. **Problem (20 s)** — students spend hours hunched over laptops; polite
-   reminders are easy to ignore. Insults are not.
-2. **Live demo (90 s)** — a judge sits down; the system notices, calibrates, and
-   they slouch on purpose. The Nest roasts them; the roast appears on the website
-   beside the live angle overlay.
-3. **Architecture (45 s)** — one slide: side-view geometry and per-user
-   calibration, the debounced state machine, and the LLM kept out of the
-   real-time path by a pre-generated, context-aware roast pool.
-4. **What's next (25 s)** — posture history and trends, multiple user profiles,
-   roast personalities.
-
-Be ready for: *why a side view* (it measures real neck and torso angles),
-*how you avoid false alarms* (calibration, smoothing, hysteresis, the away
-state), and *what happens if Gemini is down* (pre-generated pool plus offline
-fallbacks).
-
-Keep the roasts playful: the prompt roasts posture only — never appearance,
-body, identity or intelligence — stays PG and under ~15 words, and escalates in
-tiers. A **nice mode** toggle on the website switches to encouragement.
-
----
-
-## Stretch goals
-
-Only after everything else works:
-
-- **Hall of shame** — already logged: recent roasts with the angle that earned them
-  (see the panel and `GET /api/roasts`)
-- Gemini-written end-of-session report card
-- Leaderboard comparing teammates' good-posture percentages (`Database.all_sessions`)
