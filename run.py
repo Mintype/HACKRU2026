@@ -192,34 +192,51 @@ def preview_loop(coach) -> int:
 
 
 def test_voice_command(text: str) -> int:
-    """Synthesize one line with whatever TTS is configured, then play it."""
+    """Voice one line using the configured provider order, then play it."""
+    from server.settings import Settings
+    from voice.eleven_tts import ElevenLabsTTS
     from voice.gemini_tts import GeminiTTS
     from voice.tts_local import LocalTTS
 
+    settings = Settings()
+    mode = str(settings.get("tts_mode") or "auto").lower()
+    eleven, gemini, local = ElevenLabsTTS(), GeminiTTS(), LocalTTS()
     out = config.ROAST_DIR / "voice-test.wav"
-    gemini = GeminiTTS()
-    print(f"  Gemini voice : {'key found' if gemini.available else 'NO GEMINI_API_KEY (add it to .env)'}")
-    print(f"  model        : {gemini.model}")
-    print(f"  voice        : {gemini.voice}")
+
+    print(f"  voice mode   : {mode}")
+    print(f"  ElevenLabs   : {'key found' if eleven.available else 'no ELEVENLABS_API_KEY'}")
+    print(f"  Gemini       : {'key found' if gemini.available else 'no GEMINI_API_KEY'}")
+    print(f"  local engine : {local.engine or 'none'}")
     print(f"  line         : {text!r}\n")
 
-    if gemini.available and gemini.synthesize(text, out):
-        print(f"  spoke with   : {gemini.model_used or gemini.model}")
-        print(f"  wrote        : {out}  ({out.stat().st_size} bytes)")
-        _play(out)
-        return 0
-    if gemini.available:
-        print(f"  tried        : {', '.join(gemini.candidates())}")
-        print(f"  Gemini TTS failed: {(gemini.last_error or '')[:300]}")
+    # Same order RoastService uses, so this tests what the app will actually do.
+    attempts = []
+    if mode in {"auto", "elevenlabs"}:
+        attempts.append(("ElevenLabs", lambda: eleven.synthesize(text, out, "medium")))
+    if mode in {"auto", "gemini"}:
+        attempts.append(("Gemini", lambda: gemini.synthesize(text, out, "medium")))
+    if mode in {"auto", "local"}:
+        attempts.append(("local", lambda: local.synthesize(text, out)))
 
-    local = LocalTTS()
-    print(f"  local engine : {local.engine or 'none available'}")
-    if local.available and local.synthesize(text, out):
-        print(f"  wrote        : {out}  ({out.stat().st_size} bytes) [local fallback]")
-        _play(out)
-        return 0
+    for name, run in attempts:
+        if run():
+            engine = {
+                "ElevenLabs": eleven.voice_used or eleven.voice_id,
+                "Gemini": gemini.model_used or gemini.model,
+                "local": local.engine,
+            }.get(name, name)
+            print(f"  spoke with   : {name} ({engine})")
+            print(f"  wrote        : {out}  ({out.stat().st_size} bytes)")
+            _play(out)
+            return 0
+        detail = ""
+        if name == "ElevenLabs":
+            detail = eleven.last_error or ""
+        elif name == "Gemini":
+            detail = gemini.last_error or ""
+        print(f"  {name:11s} failed" + (f": {str(detail)[:160]}" if detail else ""))
 
-    print("  nothing could synthesize audio: add GEMINI_API_KEY or install espeak-ng/piper")
+    print("  nothing could synthesize audio: add a key or install espeak-ng/piper")
     return 1
 
 

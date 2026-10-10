@@ -652,7 +652,7 @@ class TestElevenLabs(unittest.TestCase):
         from voice.eleven_tts import ElevenLabsTTS
 
         tts = ElevenLabsTTS(api_key="k")
-        tts._call = lambda text, settings, with_style=True: b"\x00\x00" * 12000
+        tts._call = lambda text, settings, voice_id=None, with_style=True: b"\x00\x00" * 12000
         with tempfile.TemporaryDirectory() as tmp:
             out = pathlib.Path(tmp) / "line.wav"
             self.assertTrue(tts.synthesize("Sit up.", out, "mild"))
@@ -669,6 +669,74 @@ class TestElevenLabs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertFalse(tts.synthesize("Sit up.", pathlib.Path(tmp) / "x.wav", "mild"))
         self.assertIn("ELEVENLABS_API_KEY", tts.last_error or "")
+
+    def test_a_library_voice_falls_back_to_one_the_plan_allows(self):
+        from voice.eleven_tts import ElevenLabsTTS, PlanError
+
+        tts = ElevenLabsTTS(api_key="k", voice_id="library-voice")
+        tts._discover_voice_ids = lambda: ["premade-voice"]
+        calls = []
+
+        def fake_call(text, settings, voice_id=None, with_style=True):
+            calls.append(voice_id)
+            if voice_id == "library-voice":
+                raise PlanError("Free users cannot use library voices via the API")
+            return b"\x00\x00" * 10
+
+        tts._call = fake_call
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertTrue(tts.synthesize("Sit up.", pathlib.Path(tmp) / "x.wav", "mild"))
+        self.assertEqual(calls, ["library-voice", "premade-voice"])
+        self.assertEqual(tts.voice_used, "premade-voice")
+
+    def test_voice_queue_prefers_the_configured_voice(self):
+        from voice.eleven_tts import ElevenLabsTTS
+
+        tts = ElevenLabsTTS(api_key="k", voice_id="mine")
+        tts._discover_voice_ids = lambda: ["mine", "other"]
+        self.assertEqual(tts._voice_queue(), ["mine", "other"])
+
+    def test_list_voices_parses_the_account_payload(self):
+        import io
+        import urllib.request
+
+        from voice.eleven_tts import ElevenLabsTTS
+
+        payload = (
+            b'{"voices":[{"voice_id":"v1","name":"One","category":"premade"},'
+            b'{"voice_id":"v2","name":"Two","category":"library"}]}'
+        )
+        tts = ElevenLabsTTS(api_key="k")
+        original = urllib.request.urlopen
+        urllib.request.urlopen = lambda request, timeout=None: io.BytesIO(payload)
+        try:
+            voices = tts.list_voices()
+        finally:
+            urllib.request.urlopen = original
+        self.assertEqual([v["voice_id"] for v in voices], ["v1", "v2"])
+        self.assertEqual(voices[0]["category"], "premade")
+
+    def test_a_402_is_reported_as_a_plan_error(self):
+        import io
+        import urllib.error
+        import urllib.request
+
+        from voice.eleven_tts import ElevenLabsTTS, PlanError
+
+        tts = ElevenLabsTTS(api_key="k")
+
+        def fake_urlopen(request, timeout=None):
+            raise urllib.error.HTTPError(
+                request.full_url, 402, "Payment Required", {}, io.BytesIO(b'{"detail":"paid"}')
+            )
+
+        original = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            with self.assertRaises(PlanError):
+                tts._call("Sit up.", tts.settings_for("mild"))
+        finally:
+            urllib.request.urlopen = original
 
     def test_a_422_retries_without_the_style_setting(self):
         import io
