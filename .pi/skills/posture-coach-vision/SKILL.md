@@ -40,13 +40,23 @@ Two triggers, either can fire, both gated by the same `cooldown_seconds`:
 
 `away` (no person, or not seated) is **never** roasted. There is no warning
 stage — slouching turns the website amber, and the roast lands at
-`roast_seconds`. See the timeline for the numbers rather than guessing:
+`roast_seconds`. See the timeline for the numbers rather than guessing, and use
+`--timers` to watch a running server count down:
 
 ```bash
 python .pi/skills/posture-coach-vision/scripts/roast_timeline.py
 python .pi/skills/posture-coach-vision/scripts/roast_timeline.py --profile moderate --seconds 60
 python .pi/skills/posture-coach-vision/scripts/roast_timeline.py --profile bad --cooldown 20
+python run.py --timers              # live: state, score, slouch time, countdown
 ```
+
+`--timers` reads `next_roast` from `/api/stats`, computed by
+`PostureStateMachine.time_to_roast()`: seconds until the soonest trigger, which
+trigger that is, and whether the cooldown is holding it back. The same value
+drives the website's countdown and rides along on every SSE reading — so a
+countdown that never advances means the machine is not seeing a slouch at all,
+and a countdown stuck behind `held by cooldown` means the roast is gated, not
+broken.
 
 `--profile moderate` matters: a deep slouch trips the score trigger after ~3 s, so
 only a *moderate* slouch (score between `lower_threshold` and
