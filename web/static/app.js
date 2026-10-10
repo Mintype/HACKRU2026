@@ -11,7 +11,9 @@
   const TOPBAR = 44;
   const GAP = 12;
   const EDGE = 12;
-  const STORE_KEY = "posturecoach.hud.v5";
+  //: v6: the Controls panel became resizable and moved to the end of its column
+  //: so it could stop overlapping the System panel.
+  const STORE_KEY = "posturecoach.hud.v6";
 
   /* ------------------------------------------------------------ registry */
   // column + anchor say where auto-arrange parks a panel; order stacks them in
@@ -21,7 +23,10 @@
     chart:    { title: "Score",         width: 520, column: "left",  anchor: "bottom", order: 0, resizable: true, minW: 320, minH: 150, height: 200 },
     stats:    { title: "Session",       width: 300, column: "right", anchor: "top",    order: 0 },
     system:   { title: "System",        width: 300, column: "right", anchor: "top",    order: 1 },
-    controls: { title: "Controls",      width: 320, column: "right", anchor: "bottom", order: 0 },
+    //: order 2 so auto-arrange lays this out *after* the top-anchored panels in
+    //: the same column: it can then shrink to the space actually left rather
+    //: than being parked on top of the System panel.
+    controls: { title: "Controls",      width: 320, column: "right", anchor: "bottom", order: 2, resizable: true, minH: 220, height: 430 },
     debug:    { title: "Debug",         width: 320, column: "left",  anchor: "top",    order: 1 },
   };
 
@@ -31,20 +36,24 @@
     good: "state-good",
     slouching: "state-slouching",
     roasted: "state-roasted",
-    phone: "state-phone",
+    sleeping: "state-sleeping",
   };
   // Red means bad posture, whether or not a roast has landed yet: slouching,
-  // roasted and phone are the same badness, only the pill text distinguishes them.
+  // roasted and sleeping are the same badness, only the pill text distinguishes
+  // them.
   const STATE_COLOR = {
     away: "#8b93a1",
     calibrating: "#86a9d4",
     good: "#82c08e",
     slouching: "#d98080",
     roasted: "#d98080",
-    phone: "#d98080",
+    sleeping: "#d98080",
   };
 
   const display = { dim: 35 };
+  //: The sleep threshold lives in the settings, not the reading, so the sleep
+  //: row has to remember it between /api/stats polls.
+  let sleepThresholdSeconds = null;
   const panels = {}; // id -> { visible, x, y, w, h, collapsed }
   for (const id in PANELS) {
     panels[id] = {
@@ -175,6 +184,7 @@
   function layoutFits() {
     const vw = window.innerWidth;
     const vh = hudHeight();
+    const placed = {};
     for (const id in PANELS) {
       const p = panels[id];
       const el = panelEl(id);
@@ -183,6 +193,15 @@
       if (p.x < -1 || p.y < -1) return false;
       if (p.x + el.offsetWidth > vw + 2) return false;
       if (p.y + Math.min(el.offsetHeight, vh) > vh + 2) return false;
+      // Panels must not sit on top of each other either: a stale layout from a
+      // different monitor, or a panel that grew after an update, would otherwise
+      // hide rows behind another panel for ever. Overlapping means re-arrange.
+      const box = { l: p.x, t: p.y, r: p.x + el.offsetWidth, b: p.y + el.offsetHeight };
+      for (const other in placed) {
+        const o = placed[other];
+        if (box.l < o.r - 2 && box.r > o.l + 2 && box.t < o.b - 2 && box.b > o.t + 2) return false;
+      }
+      placed[id] = box;
     }
     return true;
   }
@@ -651,21 +670,37 @@
       setField("dbg-torso", `${num(reading.torso_angle, 1)}\u00b0   +${num(reading.torso_drift, 1)}\u00b0`);
     }
     if (reading.slouch_part !== undefined) setField("dbg-part", reading.slouch_part || "\u2014");
-    if (reading.phone !== undefined) {
+    if (reading.sleepy !== undefined) {
+      // `sleepy` is what vision sees this instant; `sleep_seconds` is how long
+      // the machine has been counting, against the threshold, so "why has it not
+      // said anything yet" is answerable at a glance.
+      const elapsed = num(reading.sleep_seconds, 1);
+      const limit = sleepThresholdSeconds === null ? "" : ` / ${num(sleepThresholdSeconds, 0)}s`;
       setField(
-        "dbg-phone",
-        reading.phone ? `yes  ${num(reading.phone_seconds, 1)}s` : "no",
-        reading.phone ? "warn" : "none"
+        "dbg-sleep",
+        reading.sleepy ? `yes  ${elapsed}s${limit}` : "no",
+        reading.sleepy ? "warn" : "none"
+      );
+    }
+    if (reading.motion !== undefined) {
+      // The stillness half of sleep: a sleeper barely moves, an awake sloucher
+      // fidgets. Compare this against the detector's sleep_stillness.
+      setField(
+        "dbg-motion",
+        reading.motion === null || reading.motion === undefined ? "\u2014" : num(reading.motion, 4),
+        reading.motion !== null && reading.motion !== undefined && reading.motion <= 0.006 ? "warn" : ""
       );
     }
     if (reading.head_down_deg !== undefined) {
       // Show the value, the calibrated reference and the difference: without the
-      // reference the phone threshold is impossible to reason about.
-      const delta = reading.phone_delta_deg;
+      // reference the sleep head threshold is impossible to reason about.
+      const delta = reading.head_drop_deg;
       const ref = reading.head_ref_deg;
       let text = `${num(reading.head_down_deg, 0)}\u00b0`;
       text += ref === null || ref === undefined ? "   ref --" : `   ref ${num(ref, 0)}\u00b0`;
-      if (delta !== null && delta !== undefined) text += `   +${num(delta, 0)}\u00b0`;
+      if (delta !== null && delta !== undefined) {
+        text += `   ${delta >= 0 ? "+" : "\u2212"}${num(Math.abs(delta), 0)}\u00b0`;
+      }
       setField(
         "dbg-head",
         text,
@@ -697,13 +732,16 @@
     if (stats) {
       const live = stats.live || {};
       const settings = stats.settings || {};
+      if (settings.sleep_threshold_seconds !== undefined) {
+        sleepThresholdSeconds = settings.sleep_threshold_seconds;
+      }
       setField(
         "dbg-thresholds",
         `slouch<${num(settings.lower_threshold, 2)}  good>${num(settings.upper_threshold, 2)}  \u00b1${num(settings.delta_angle, 0)}\u00b0`
       );
       setField(
         "dbg-timers",
-        `roast ${num(settings.roast_seconds, 0)}s  cool ${num(settings.cooldown_seconds, 0)}s  bad<${num(settings.bad_score_threshold, 2)} ${num(settings.bad_score_seconds, 0)}s  phone ${num(settings.phone_threshold_seconds, 0)}s`
+        `roast ${num(settings.roast_seconds, 0)}s  cool ${num(settings.cooldown_seconds, 0)}s  bad<${num(settings.bad_score_threshold, 2)} ${num(settings.bad_score_seconds, 0)}s`
       );
       setField(
         "dbg-session",
@@ -873,7 +911,7 @@
 
   function fillSettings(settings) {
     if (!settings) return;
-    ["roast_seconds", "cooldown_seconds", "delta_angle", "bad_score_threshold", "phone_threshold_seconds", "live_api_cooldown_seconds"].forEach((key) => {
+    ["roast_seconds", "cooldown_seconds", "delta_angle", "bad_score_threshold", "sleep_threshold_seconds", "live_api_cooldown_seconds"].forEach((key) => {
       const input = $("settings-form").elements[key];
       if (input && settings[key] !== undefined) input.value = settings[key];
     });
@@ -946,7 +984,7 @@
         cooldown_seconds: Number(form.elements["cooldown_seconds"].value),
         delta_angle: Number(form.elements["delta_angle"].value),
         bad_score_threshold: Number(form.elements["bad_score_threshold"].value),
-        phone_threshold_seconds: Number(form.elements["phone_threshold_seconds"].value),
+        sleep_threshold_seconds: Number(form.elements["sleep_threshold_seconds"].value),
         live_api_cooldown_seconds: Number(form.elements["live_api_cooldown_seconds"].value),
         roast_source: form.elements["roast_source"].value,
         audio_route: form.elements["audio_route"].value,

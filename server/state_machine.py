@@ -8,6 +8,7 @@ States and thresholds follow the build guide::
     away -> (seated ~2 s) -> calibrating -> good
     good -> slouching (score < 0.7)
     slouching -> roasted (10 s, if no cooldown is active)
+    any -> sleeping (collapsed, motionless and head down for 25 s)
     any -> good again after ~2 s of good posture (debounced)
 
 Events (the machine -> voice / website contract)::
@@ -31,9 +32,9 @@ CALIBRATING = "calibrating"
 GOOD = "good"
 SLOUCHING = "slouching"
 ROASTED = "roasted"
-PHONE = "phone"
+SLEEPING = "sleeping"
 
-STATES = (AWAY, CALIBRATING, GOOD, SLOUCHING, ROASTED, PHONE)
+STATES = (AWAY, CALIBRATING, GOOD, SLOUCHING, ROASTED, SLEEPING)
 
 
 @dataclass
@@ -51,9 +52,10 @@ class StateMachineConfig:
     bad_score_threshold: float = 0.45
     #: The bad score must hold this long, so one noisy frame cannot fire an API call.
     bad_score_seconds: float = 3.0
-    #: How long they may stare down at a phone/device before being roasted. 0
-    #: disables the phone trigger.
-    phone_threshold_seconds: float = 10.0
+    #: How long they may sit collapsed and motionless before being accused of
+    #: sleeping. Long on purpose: this is the slowest, least certain trigger.
+    #: 0 disables it.
+    sleep_threshold_seconds: float = 25.0
 
 
 class PostureStateMachine:
@@ -66,7 +68,13 @@ class PostureStateMachine:
         self.slouch_since: Optional[float] = None
         self.good_since: Optional[float] = None
         self.bad_since: Optional[float] = None
-        self.phone_since: Optional[float] = None
+        self.sleep_since: Optional[float] = None
+        #: True once the sleep threshold has passed, i.e. the machine has
+        #: committed to "asleep" rather than "slouching". While it is true the
+        #: slouch trigger stops roasting, so the two never fight over the one
+        #: cooldown (a collapsed person would otherwise get a slouch roast every
+        #: cooldown for ever and the sleep roast would never get a turn).
+        self.sleep_ready = False
         self.hysteresis_slouch = False
         self.roasted = False
 
@@ -105,7 +113,8 @@ class PostureStateMachine:
             if self.state != AWAY:
                 events.append(self._end_session(ts, reason="left"))
             self._reset_episode()
-            self.phone_since = None
+            self.sleep_since = None
+            self.sleep_ready = False
             self._transition(ts, AWAY, events)
             return events
 
@@ -119,7 +128,8 @@ class PostureStateMachine:
             self.slouch_part = "even"
             self._part_votes = {"neck": 0, "torso": 0, "even": 0}
             self.bad_since = None
-            self.phone_since = None
+            self.sleep_since = None
+            self.sleep_ready = False
             self.cooldown_until = 0.0
             events.append(
                 {
@@ -176,13 +186,15 @@ class PostureStateMachine:
         elif score >= self.config.upper_threshold:
             self.hysteresis_slouch = False
 
+        # Sleep first: when they are actually asleep, that is the story, and the
+        # sleep roast should take the cooldown rather than the slouch one.
+        events.extend(self._sleeping(ts, reading, score))
         if self.hysteresis_slouch:
             events.extend(self._slouching(ts, reading))
-        elif not reading.get("phone"):
-            # While the phone is out, do not recover to good: the fault is still
-            # happening even though the posture score looks fine.
+        elif not reading.get("sleepy"):
+            # While they are asleep, do not recover to good: the fault is still
+            # happening even if the score wobbles back up.
             events.extend(self._recovering(ts))
-        events.extend(self._phone(ts, reading, score))
         return events
 
     def request_calibration(self) -> bool:
@@ -202,6 +214,17 @@ class PostureStateMachine:
         now = float(now if now is not None else time.time())
         empty = {"seconds": None, "trigger": None, "blocked_by": None, "ready": False}
 
+        # Once the sleep threshold has passed, the sleep trigger owns the next
+        # roast: report that rather than a slouch countdown that will be ignored.
+        if self.sleep_ready:
+            wait = max(0.0, self.cooldown_until - now)
+            return {
+                "seconds": round(wait, 1),
+                "trigger": "sleeping",
+                "blocked_by": "cooldown" if wait > 0 else None,
+                "ready": wait <= 0.0,
+            }
+
         waits: List[tuple] = []
         if self.slouch_since is not None:
             elapsed = now - self.slouch_since
@@ -210,9 +233,9 @@ class PostureStateMachine:
                 waits.append(
                     ("bad_posture", max(0.0, self.config.bad_score_seconds - (now - self.bad_since)))
                 )
-        if self.config.phone_threshold_seconds > 0 and self.phone_since is not None:
+        if self.config.sleep_threshold_seconds > 0 and self.sleep_since is not None:
             waits.append(
-                ("phone", max(0.0, self.config.phone_threshold_seconds - (now - self.phone_since)))
+                ("sleeping", max(0.0, self.config.sleep_threshold_seconds - (now - self.sleep_since)))
             )
         if not waits:
             return empty
@@ -238,8 +261,9 @@ class PostureStateMachine:
             "worst_neck_angle": round(self.worst_neck_angle, 1),
             "worst_torso_angle": round(self.worst_torso_angle, 1),
             "slouch_part": self.slouch_part,
-            "phone": bool((self.last_reading or {}).get("phone")),
-            "phone_seconds": round(now - self.phone_since, 1) if self.phone_since is not None else 0.0,
+            "sleepy": bool((self.last_reading or {}).get("sleepy")),
+            "sleeping": self.state == SLEEPING,
+            "sleep_seconds": round(now - self.sleep_since, 1) if self.sleep_since is not None else 0.0,
             "slouch_seconds": round(max(0.0, now - self.slouch_since), 1) if self.slouch_since else 0.0,
             "bad_seconds": round(max(0.0, now - self.bad_since), 1) if self.bad_since else 0.0,
             "cooldown_remaining": round(max(0.0, self.cooldown_until - now), 1),
@@ -284,6 +308,12 @@ class PostureStateMachine:
 
         elapsed = ts - self.slouch_since
 
+        # While they are asleep this trigger stands down: "you are asleep" is the
+        # better insult, and it must not be blocked by a slouch roast taking the
+        # cooldown every time it comes free.
+        if self.sleep_ready:
+            return events
+
         # Score-based trigger: proper bad posture roasts now rather than waiting
         # out roast_seconds. It has to hold for bad_score_seconds first, so a
         # single noisy reading cannot fire it.
@@ -310,25 +340,36 @@ class PostureStateMachine:
             events.extend(self._fire_roast(ts, elapsed, score, "bad_posture"))
         return events
 
-    def _phone(self, ts: float, reading: Dict, score: Optional[float]) -> List[Dict]:
-        """Roast sustained head-down, which is its own fault.
+    def _sleeping(self, ts: float, reading: Dict, score: Optional[float]) -> List[Dict]:
+        """Roast them for nodding off, which is its own fault.
 
-        It deliberately runs outside the slouch machine: someone can sit up
-        perfectly straight and still stare into their lap, and that deserves an
-        insult too. The cooldown is the only thing spacing those out.
+        It runs alongside the slouch machine rather than inside it: the trigger
+        is the *stillness* and the dropped head, not the angle alone, so it keeps
+        its own clock. Once it is ready the slouch trigger stands down, so the
+        two share the one cooldown in an orderly way instead of fighting.
         """
         events: List[Dict] = []
-        if self.config.phone_threshold_seconds <= 0 or not reading.get("phone"):
-            self.phone_since = None
+        if self.config.sleep_threshold_seconds <= 0 or not reading.get("sleepy"):
+            self.sleep_since = None
+            self.sleep_ready = False
+            if self.state == SLEEPING and self.slouch_since is not None:
+                # They moved: no longer asleep, same collapsed episode. Hand the
+                # story back to the slouch trigger rather than leaving the pill
+                # stuck on sleeping.
+                self._transition(ts, SLOUCHING, events)
             return events
-        if self.phone_since is None:
-            self.phone_since = ts
-            # Show it: a red "phone" pill beats a green one with a hidden fault.
-            if self.state == GOOD:
-                self._transition(ts, PHONE, events)
-        elapsed = ts - self.phone_since
-        if elapsed >= self.config.phone_threshold_seconds and ts >= self.cooldown_until:
-            events.extend(self._fire_roast(ts, elapsed, score or 0.0, "phone"))
+        if self.sleep_since is None:
+            self.sleep_since = ts
+        elapsed = ts - self.sleep_since
+        self.sleep_ready = elapsed >= self.config.sleep_threshold_seconds
+        if not self.sleep_ready:
+            return events
+        # Show it: a red "sleeping" pill beats a red "slouching" one hiding the
+        # real fault, and the pill flips exactly when the machine commits.
+        if self.state in (GOOD, SLOUCHING, ROASTED):
+            self._transition(ts, SLEEPING, events)
+        if ts >= self.cooldown_until:
+            events.extend(self._fire_roast(ts, elapsed, score or 0.0, "sleeping"))
         return events
 
     def _fire_roast(self, ts: float, elapsed: float, score: float, reason: str) -> List[Dict]:
@@ -337,8 +378,8 @@ class PostureStateMachine:
         self.roasts_due += 1
         self.cooldown_until = ts + self.config.cooldown_seconds
         events: List[Dict] = []
-        # A phone roast keeps the `phone` state; the posture triggers show ROASTED.
-        if reason != "phone":
+        # A sleep roast keeps the `sleeping` state; the posture triggers show ROASTED.
+        if reason != "sleeping":
             self._transition(ts, ROASTED, events)
         events.append(
             {
@@ -350,7 +391,7 @@ class PostureStateMachine:
                 "worst_neck_angle": round(self.worst_neck_angle, 1),
                 "worst_torso_angle": round(self.worst_torso_angle, 1),
                 "slouch_part": self.slouch_part,
-                "phone": reason == "phone",
+                "sleeping": reason == "sleeping",
                 "slouch_seconds": round(elapsed, 1),
                 "score": round(score, 3),
                 "state": ROASTED,
@@ -363,7 +404,7 @@ class PostureStateMachine:
         if self.good_since is None:
             self.good_since = ts
         # Debounce the return to good so a brief sit-up cannot dodge the roast.
-        if self.state in (SLOUCHING, ROASTED, PHONE) and (ts - self.good_since) >= self.config.good_debounce_seconds:
+        if self.state in (SLOUCHING, ROASTED, SLEEPING) and (ts - self.good_since) >= self.config.good_debounce_seconds:
             self._reset_episode()
             self._transition(ts, GOOD, events)
             events.append(

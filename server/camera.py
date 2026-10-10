@@ -216,8 +216,8 @@ class VisionService(threading.Thread):
                     self.session_id = self.db.start_session(event.get("ts"))
                 except Exception:
                     pass
-            # Measure this person's "sitting up straight" head tilt, so the
-            # phone rule is relative to them rather than a guessed angle.
+            # Measure this person's "sitting up straight" head tilt, so a dropped
+            # head is judged against them rather than a guessed angle.
             if self.detector is not None:
                 self.detector.start_head_calibration(
                     event.get("ts") or time.time(), self.state_machine.config.calibration_seconds
@@ -275,15 +275,15 @@ class VisionService(threading.Thread):
                 "thigh_angle": reading.get("thigh_angle"),
                 "head_down_deg": reading.get("head_down_deg"),
                 "head_ref_deg": reading.get("head_ref_deg"),
-                "phone_delta_deg": reading.get("phone_delta_deg"),
-                "hands_up": reading.get("hands_up"),
-                "phone": reading.get("phone"),
-                "phone_seconds": reading.get("phone_seconds"),
+                "head_drop_deg": reading.get("head_drop_deg"),
+                "motion": reading.get("motion"),
+                "sleepy": reading.get("sleepy"),
                 "state": reading.get("state"),
                 "fps": self.fps,
                 "calibrated": reading.get("calibrated"),
                 # everything the web page's Debug panel needs to tick live
                 "slouch_seconds": snapshot.get("slouch_seconds"),
+                "sleep_seconds": snapshot.get("sleep_seconds"),
                 "cooldown_remaining": snapshot.get("cooldown_remaining"),
                 "calibration_progress": snapshot.get("calibration_progress"),
                 "next_roast": snapshot.get("next_roast"),

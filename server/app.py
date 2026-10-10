@@ -160,9 +160,10 @@ class Coach:
             "worst_neck_angle": snap.get("worst_neck_angle"),
             "worst_torso_angle": snap.get("worst_torso_angle"),
             "slouch_part": snap.get("slouch_part"),
-            "phone": bool(snap.get("phone")),
-            "phone_seconds": snap.get("phone_seconds"),
+            "sleeping": bool(snap.get("sleeping")),
+            "sleep_seconds": snap.get("sleep_seconds"),
             "head_down_deg": reading.get("head_down_deg"),
+            "head_drop_deg": reading.get("head_drop_deg"),
             "neck_drift": reading.get("neck_drift"),
             "torso_drift": reading.get("torso_drift"),
         }

@@ -53,8 +53,9 @@ class TestFakeReadings(unittest.TestCase):
         self.assertIn("roast_due", names)
         # there is no warning stage any more
         self.assertNotIn("warn", names)
-        self.assertEqual(machine.slouch_count, 2)
-        self.assertTrue(any(e.get("reason") == "phone" for e in events))
+        self.assertEqual(machine.slouch_count, 3)
+        # the sleep phase is long enough to trip the slowest trigger
+        self.assertTrue(any(e.get("reason") == "sleeping" for e in events))
         self.assertEqual(machine.state, "good")
 
 

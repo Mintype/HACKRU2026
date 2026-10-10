@@ -102,20 +102,24 @@ def render(reading: Dict[str, object], width: int = WIDTH, height: int = HEIGHT,
     label = f"neck {neck:.0f}deg   torso {torso:.0f}deg"
     if score is not None:
         label += f"   score {score:.2f}"
-    if reading.get("phone"):
-        label += "   PHONE"
+    if reading.get("sleepy"):
+        label += "   ASLEEP"
     cv2.putText(frame, label, (16, 62), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
 
-    # A little rectangle in front of the chest, so the demo shows what it saw.
-    if reading.get("phone"):
-        phone_rect = (int(hip[0] + 30), int(hip[1] - 40))
-        cv2.rectangle(
-            frame,
-            phone_rect,
-            (phone_rect[0] + 16, phone_rect[1] + 30),
-            (150, 150, 160),
-            -1,
-        )
+    # A little "zzz" over a dropped head, so the demo shows what it saw.
+    if reading.get("sleepy"):
+        head = ipt(ear)
+        for index, scale in enumerate((0.5, 0.65, 0.8), start=1):
+            cv2.putText(
+                frame,
+                "z",
+                (head[0] + 26 + index * 14, head[1] - 12 - index * 12),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                scale,
+                (200, 200, 210),
+                2,
+                cv2.LINE_AA,
+            )
 
     state = str(reading.get("state") or "").upper()
     if state:

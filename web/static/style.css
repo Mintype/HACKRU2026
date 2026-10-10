@@ -120,7 +120,7 @@ html, body {
 .state-good        { color: var(--good); }
 .state-slouching   { color: var(--bad); }
 .state-roasted     { color: var(--bad); }
-.state-phone       { color: var(--bad); }
+.state-sleeping    { color: var(--bad); }
 .offline           { color: var(--warn); }
 
 /* --------------------------------------------------------------- buttons */
@@ -261,6 +261,9 @@ body.is-fullscreen .icon-exit { display: block; }
 .panel-btn:hover { color: var(--ink); background: rgba(255, 255, 255, 0.1); }
 
 .panel-body { padding: 11px 12px 12px; }
+/* The Controls form is tall, so as the bottom-anchored panel is squeezed by the
+   panels above it the form scrolls inside instead of spilling out. */
+.panel[data-panel="controls"] .panel-body { min-height: 0; overflow-y: auto; }
 
 .panel[data-panel="chart"] { display: flex; flex-direction: column; }
 .panel[data-panel="chart"] .panel-body { flex: 1; min-height: 0; padding: 8px; display: flex; }

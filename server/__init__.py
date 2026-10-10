@@ -4,8 +4,8 @@ from .state_machine import (
     AWAY,
     CALIBRATING,
     GOOD,
-    PHONE,
     ROASTED,
+    SLEEPING,
     SLOUCHING,
     PostureStateMachine,
     StateMachineConfig,
@@ -17,7 +17,7 @@ __all__ = [
     "GOOD",
     "SLOUCHING",
     "ROASTED",
-    "PHONE",
+    "SLEEPING",
     "PostureStateMachine",
     "StateMachineConfig",
 ]

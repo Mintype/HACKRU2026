@@ -10,11 +10,11 @@ Usage
     python roast_timeline.py --profile bad --bad-score 0        # disable the score trigger
 
 Profiles
-    scripted  the --simulate sequence: away -> good -> slouch -> phone -> good ...
+    scripted  the --simulate sequence: away -> good -> sleep -> good -> slouch ...
     bad       seated and slouching hard from t=0 (trips the deep-slouch trigger)
     moderate  slouching but not deeply (score 0.55), which exercises the
               sustained timer instead of the deep-slouch trigger
-    phone     sitting up well, but staring down at a phone
+    sleeping  collapsed, motionless and head down: trips the slow sleep trigger
     good      seated and sitting well the whole time (should never roast)
 """
 
@@ -54,16 +54,16 @@ def profile_readings(name: str, seconds: float, fps: float) -> Iterator[dict]:
     ts = 0.0
     while ts < seconds:
         if name == "bad":
-            neck, torso, score, part, phone = 46.0, 6.0, 0.2, "neck", False
+            neck, torso, score, part, sleepy = 46.0, 6.0, 0.2, "neck", False
         elif name == "moderate":
             # below the slouch threshold but above the deep-slouch trigger, so
             # only the sustained timer can fire
-            neck, torso, score, part, phone = 20.0, 6.0, 0.55, "neck", False
-        elif name == "phone":
-            # sitting up perfectly well, but staring into a phone
-            neck, torso, score, part, phone = 12.0, 4.0, 0.97, "even", True
+            neck, torso, score, part, sleepy = 20.0, 6.0, 0.55, "neck", False
+        elif name == "sleeping":
+            # collapsed, not moving, head down: the slow trigger
+            neck, torso, score, part, sleepy = 46.0, 18.0, 0.15, "torso", True
         else:
-            neck, torso, score, part, phone = 12.0, 4.0, 0.97, "even", False
+            neck, torso, score, part, sleepy = 12.0, 4.0, 0.97, "even", False
         yield {
             "ts": ts,
             "person": True,
@@ -74,10 +74,9 @@ def profile_readings(name: str, seconds: float, fps: float) -> Iterator[dict]:
             "neck_drift": max(0.0, neck - 12.0),
             "torso_drift": max(0.0, torso - 4.0),
             "slouch_part": part,
-            "head_down_deg": 52.0 if phone else 6.0,
-            "hands_up": phone,
-            "phone": phone,
-            "phone_seconds": round(ts, 1) if phone else 0.0,
+            "head_down_deg": 55.0 if sleepy else 6.0,
+            "motion": 0.001 if sleepy else 0.02,
+            "sleepy": sleepy,
         }
         ts += step
 
@@ -86,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--profile", choices=("scripted", "bad", "moderate", "phone", "good"), default="scripted")
+    parser.add_argument("--profile", choices=("scripted", "bad", "moderate", "sleeping", "good"), default="scripted")
     parser.add_argument("--fps", type=float, default=10.0)
     parser.add_argument("--seconds", type=float, default=180.0, help="only used by bad/good")
     parser.add_argument("--roast", type=float, help="override roast_seconds")
@@ -109,7 +108,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"profile={args.profile}  roast={config.roast_seconds:g}s  "
         f"cooldown={config.cooldown_seconds:g}s  bad<{config.bad_score_threshold:g} for "
-        f"{config.bad_score_seconds:g}s  calibration={config.calibration_seconds:g}s"
+        f"{config.bad_score_seconds:g}s  sleep={config.sleep_threshold_seconds:g}s  "
+        f"calibration={config.calibration_seconds:g}s"
     )
     print("-" * 80)
 

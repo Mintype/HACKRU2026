@@ -26,8 +26,9 @@ from .roasts import fallback_batch, pick_topic
 
 log = logging.getLogger(__name__)
 
-#: Drop generated lines longer than this (kept just above the 6-12 the prompt asks for).
-MAX_WORDS = 14
+#: Drop generated lines longer than this. The prompt asks for 3-9 words; this is
+#: the slack allowed before a line is thrown away as a rambling one.
+MAX_WORDS = 11
 
 #: How long to skip a text model that failed because it is gone or out of quota.
 MODEL_SKIP_SECONDS = 6 * 3600
@@ -77,13 +78,21 @@ DEFAULT_ROAST_PROMPT = """\
 You write one-line insults for a webcam that watches how someone sits. When they
 slouch, a speaker in the room says your line out loud, in front of other people.
 
+YOU ARE THE CHEF
+A furious, world-famous chef, mid-service, and the dish is their posture. It is
+RAW. Furious about the plate, never cruel about the person. Think a chef shouting
+across a hot kitchen, not a posture pamphlet, not an HR memo.
+
 Be genuinely funny and actually roast them. A polite reminder is a failure.
+Name the part that is actually giving way, and land one sharp image when it earns
+its place: food and kitchens are the house speciality, but a garnish rather than
+the whole dish, and a plain furious line beats a forced food joke.
 
 HARD RULES
 - Attack the slouch, never the person: no appearance, body shape, weight, age,
   gender, race, identity, intelligence or ability. Ever.
 - PG. No profanity, no slurs.
-- SHORT: 6-12 words. One breath. No emoji, no quotation marks.
+- SHORT: 3-9 words. One breath, one hit. No emoji, no quotation marks.
 - Never explain the joke.
 
 TIER FOR THIS BATCH
@@ -101,12 +110,15 @@ Return exactly {{COUNT}} lines, JSON only:
 """
 
 DEFAULT_NICE_PROMPT = """\
-You write one-line encouragement for a webcam that watches how someone sits.
-When they sit up well, a speaker in the room says your line out loud.
+You write one-line praise for a webcam that watches how someone sits. When they
+sit up well, a speaker in the room says your line out loud.
 
-Warm, specific, and a little bit funny. No filler like "great job".
+Same chef, but the dish is perfect and you are delighted: warm, specific, a little
+theatrical, never condescending.
+
 Never comment on appearance, body, identity or ability. PG. Kind.
-SHORT: 5-12 words. No emoji, no quotation marks.
+SHORT: 3-9 words. No emoji, no quotation marks. A food comparison now and then is
+welcome; never force one.
 
 SESSION CONTEXT (optional colour)
 {{CONTEXT}}
@@ -179,9 +191,10 @@ def _context_lines(context: Dict) -> List[str]:
 
     if context.get("worst_neck_angle") is not None:
         lines.append(f"- Worst forward-head angle so far: {context['worst_neck_angle']} degrees from vertical.")
-    if context.get("phone"):
+    if context.get("sleeping"):
         lines.append(
-            "- This is not a posture problem: they are staring down at a phone or device."
+            "- IMPORTANT: they have nodded off - slumped, motionless, head down. "
+            "The line must be about falling asleep at the desk and must tell them to wake up."
         )
     if context.get("worst_torso_angle"):
         lines.append(f"- Worst torso angle so far: {context['worst_torso_angle']} degrees from vertical.")
@@ -376,7 +389,7 @@ class RoastWriter:
                 nice=nice,
                 exclude=list(exclude) + [i["text"] for i in items],
                 part=(context or {}).get("slouch_part"),
-                fault="phone" if (context or {}).get("phone") else None,
+                fault="sleeping" if (context or {}).get("sleeping") else None,
             )
         return items[:count]
 

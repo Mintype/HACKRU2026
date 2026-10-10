@@ -87,11 +87,19 @@ class TestPromptAndValidation(unittest.TestCase):
         self.assertIn("insult", roast.lower())
         self.assertIn("praise", nice.lower())
 
-    def test_the_roast_prompt_is_a_chef_who_always_compares(self):
+    def test_the_roast_prompt_is_a_concise_chef(self):
         roast = load_prompt_template(False)
-        self.assertIn("chef", roast.lower())
-        self.assertIn("food", roast.lower())
-        self.assertIn("comparison", roast.lower())
+        lowered = roast.lower()
+        self.assertIn("chef", lowered)
+        self.assertIn("comparison", lowered)
+        # The food is a garnish, not the whole dish, and the lines stay short.
+        self.assertIn("garnish", lowered)
+        self.assertIn("3-9 words", lowered)
+
+    def test_the_nice_prompt_is_short_and_does_not_force_food(self):
+        nice = load_prompt_template(True).lower()
+        self.assertIn("3-9 words", nice)
+        self.assertIn("do not force one", nice)
 
     def test_prompt_names_the_failing_part(self):
         neck = build_prompt(count=3, tier="mild", context={"slouch_part": "neck"})
@@ -131,14 +139,14 @@ class TestPromptAndValidation(unittest.TestCase):
         self.assertGreaterEqual(len(roasts.SPICY), 15)
         self.assertGreaterEqual(len(roasts.NICE), 10)
 
-    def test_fallback_batch_can_aim_at_the_phone(self):
-        batch = roasts.fallback_batch(count=4, tier="mild", fault="phone")
-        self.assertTrue(any(item["text"] in roasts.PHONE for item in batch))
-        self.assertGreaterEqual(len(roasts.PHONE), 8)
+    def test_fallback_batch_can_aim_at_sleep(self):
+        batch = roasts.fallback_batch(count=4, tier="mild", fault="sleeping")
+        self.assertTrue(any(item["text"] in roasts.SLEEPING for item in batch))
+        self.assertGreaterEqual(len(roasts.SLEEPING), 8)
 
-    def test_prompt_mentions_the_phone(self):
-        prompt = build_prompt(count=3, tier="mild", context={"phone": True})
-        self.assertIn("staring down at a phone", prompt)
+    def test_prompt_says_they_nodded_off(self):
+        prompt = build_prompt(count=3, tier="mild", context={"sleeping": True})
+        self.assertIn("nodded off", prompt)
 
     def test_prompt_carries_a_writing_angle(self):
         from voice.roasts import TOPICS

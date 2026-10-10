@@ -17,14 +17,18 @@ it as translucent panels. Data arrives over server-sent events from `/events`;
 on load.
 
 Panels are declared **once** in the `PANELS` registry in `app.js` (title, width,
-`column`, `anchor`, `order`, `resizable`, `visible`) and must also exist in
-`index.html` as `<section class="panel" data-panel="id">`. `arrange()` parks them in
+`column`, `anchor`, `order`, `resizable`, `visible`) and must also exist in`index.html` as `<section class="panel" data-panel="id">`. `arrange()` parks them in
 the corners so the middle of the frame — where the person is — stays clear.
 
 ## Layout, dragging and persistence
 
 - Drag by the panel header, collapse with the header buttons, hide/show from the
-  **Panels** menu; the Score panel is resizable from its corner.
+  **Panels** menu; the Score panel and the Controls form are resizable from their
+  corner, and a resizable bottom-anchored panel **shrinks to the space left** by
+  the panels above it (its body scrolls) instead of landing on top of them. That
+  only works because `order` decides who is laid out first: Controls is `order: 2`
+  so it is placed after System and can see where System ended. Laying it out
+  earlier (equal `order`) is exactly how it used to overlap System.
 - The layout lives in `localStorage` under `posturecoach.hud.vN`. **Bump `N` whenever
   default positions change**, or existing users keep the stale defaults.
 - `layoutFits()` trusts a stored layout only if every panel is on screen; otherwise it
@@ -43,8 +47,9 @@ the corners so the middle of the frame — where the person is — stays clear.
 - Flat and instrument-like: hairline borders, 2 px corners, frosted
   `backdrop-filter` surfaces, no pill shapes, no drop shadows. Icons are inline
   [Heroicons](https://heroicons.com) — inline them, do not add an icon font.
-- **Colour coding is deliberately blunt: green = good, red = bad.** `slouching`
-  and `roasted` are the same red — only the pill text tells them apart — and amber
+- **Colour coding is deliberately blunt: green = good, red = bad.** `slouching`,
+  `roasted` and `sleeping` are all the same red — only the pill text tells them
+  apart — and amber
   means "undecided", i.e. the score sits in the narrow band between the two
   thresholds so the state has not changed. The chart ramp follows the same rule
   (green above the good threshold, red below the slouch threshold). Keep any new
@@ -99,7 +104,9 @@ Two panels carry the debugging surface, and both must stay wired:
   (amber when the pool is mixed), **Roast source** (live/pool, pending live roasts,
   API cooldown) and insults used.
 - **Debug** — the raw internals, live: state, detection, score (smoothed + raw),
-  neck/torso with drift, failing part, slouch timer, the roast countdown with its
+  neck/torso with drift, failing part, **Sleeping / Motion / Head down** (the three
+  sleep inputs — `Head down` shows the value, the calibrated reference and the
+  difference), slouch timer, the roast countdown with its
   trigger or blocker, cooldown, calibration progress, the thresholds and timers in
   use, camera stats, session id and the last state-machine event. Its rows use
   `.kv.compact` so the panel stays short enough not to collide with the chart.
@@ -110,3 +117,12 @@ adding the id in `index.html` and a `setField("dbg-…")` call in `updateDebugLi
 or `updateDebugStats`. If a countdown never starts, the machine is not seeing a
 slouch; if it is stuck behind `cooldown`, the roast is gated, not broken. If a
 roast is silent, start elsewhere — the timer is working.
+
+`layoutFits()` refuses a restored layout that is off-screen **or that has two
+panels overlapping** (a stale layout from a different monitor, or a panel that grew
+in an update). Overlap means auto-arrange, so a stored layout cannot leave rows
+hidden behind another panel for ever. The storage key is versioned
+(`posturecoach.hud.v6`) — **bump it whenever the default panel set or geometry
+changes**, or every existing browser keeps the old arrangement. On a very short
+viewport (under ~700 px tall) the columns can still run out of room, since panels
+shrink only to their minimum; collapse or hide one.

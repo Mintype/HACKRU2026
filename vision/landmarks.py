@@ -135,17 +135,15 @@ class PoseLandmarker:
             vis = getattr(lm, "visibility", None)
             return (float(lm.x) * width, float(lm.y) * height, float(vis) if vis is not None else 1.0)
 
-        nose = lms[NOSE]
-        nose_vis = getattr(nose, "visibility", None)
+        # Only what the detector actually uses: ear + eye for the head tilt,
+        # shoulder/hip/knee for the neck and torso angles.
         return {
             "side": side,
             "ear": point(EAR),
             "eye": point(EYE),
             "shoulder": point(SHOULDER),
-            "wrist": point(WRIST),
             "hip": point(HIP),
             "knee": point(KNEE),
-            "nose": (float(nose.x) * width, float(nose.y) * height, float(nose_vis) if nose_vis is not None else 1.0),
         }
 
     def close(self) -> None:

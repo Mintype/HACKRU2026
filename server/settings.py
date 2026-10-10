@@ -23,7 +23,7 @@ DEFAULTS: Dict[str, Any] = {
     "upper_threshold": 0.8,
     "bad_score_threshold": 0.45,
     "bad_score_seconds": 3.0,
-    "phone_threshold_seconds": 10.0,
+    "sleep_threshold_seconds": 25.0,
     # vision
     "delta_angle": 20.0,
     "camera_index": 0,
@@ -51,7 +51,7 @@ BOUNDS: Dict[str, tuple] = {
     "upper_threshold": (0.05, 1.0),
     "bad_score_threshold": (0.0, 1.0),
     "bad_score_seconds": (0.0, 60.0),
-    "phone_threshold_seconds": (0.0, 600.0),
+    "sleep_threshold_seconds": (0.0, 600.0),
     "live_api_cooldown_seconds": (0.0, 3600.0),
     "delta_angle": (1.0, 60.0),
     "camera_index": (0, 16),
@@ -65,13 +65,16 @@ MODELS = ("lite", "full", "heavy")
 
 #: Bump this whenever a default changes, so an existing settings.json cannot keep
 #: overriding the new value for ever.
-SETTINGS_VERSION = 3
+SETTINGS_VERSION = 4
 
 #: version -> the values to force onto files older than it. Everything the user
 #: tuned by hand (camera index, mirror, voice) is preserved.
 MIGRATIONS: Dict[int, Dict[str, Any]] = {
     1: {"roast_seconds": 10.0, "cooldown_seconds": 10.0},
     2: {"live_api_cooldown_seconds": 10.0},
+    # Phone detection is gone; sleep detection replaced it. The old key is simply
+    # dropped when the file is rewritten (only known keys are saved).
+    3: {"sleep_threshold_seconds": 25.0},
 }
 
 
@@ -182,7 +185,7 @@ class Settings:
             "upper_threshold",
             "bad_score_threshold",
             "bad_score_seconds",
-            "phone_threshold_seconds",
+            "sleep_threshold_seconds",
         )
         with self._lock:
             for key in mapping:

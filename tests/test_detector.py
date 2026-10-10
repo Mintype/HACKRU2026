@@ -24,9 +24,7 @@ def upright():
         "side": "right",
         "ear": (100.0, 100.0, 1.0),
         "eye": (150.0, 105.0, 1.0),
-        "nose": (185.0, 110.0, 1.0),
         "shoulder": (100.0, 200.0, 1.0),
-        "wrist": (120.0, 320.0, 1.0),
         "hip": (100.0, 300.0, 1.0),
         "knee": (200.0, 310.0, 1.0),
     }
@@ -38,9 +36,7 @@ def slouching():
         "side": "right",
         "ear": (150.0, 110.0, 1.0),
         "eye": (200.0, 115.0, 1.0),
-        "nose": (235.0, 120.0, 1.0),
         "shoulder": (100.0, 200.0, 1.0),
-        "wrist": (120.0, 320.0, 1.0),
         "hip": (100.0, 300.0, 1.0),
         "knee": (200.0, 310.0, 1.0),
     }
@@ -122,41 +118,86 @@ class TestPostureDetector(unittest.TestCase):
         self.assertEqual(reading["slouch_part"], "torso")
         self.assertGreater(reading["torso_drift"], reading["neck_drift"])
 
-    def test_phone_is_false_until_the_head_is_actually_down(self):
-        detector = self.make(upright())
-        detector.set_baseline(12.0, 4.0)
-        reading = detector.process(frame=None, ts=0.0)
-        # eye ~6 degrees below the ear: level, not a phone
-        self.assertFalse(reading["phone"])
-        self.assertIsNone(reading["head_ref_deg"])
+class TestSleepDetection(unittest.TestCase):
+    """Sleep is collapsed + motionless + head down, held for a while.
 
-    def test_phone_is_measured_against_the_calibrated_head_level(self):
+    The pieces are tested separately because each one alone is a false positive:
+    a dropped head is just looking down, and a collapse is just slouching.
+    """
+
+    def collapsed(self):
+        """A bad slump with the head dropped far below the calibrated level."""
+        landmarks = slouching()
+        landmarks["ear"] = (150.0, 110.0, 1.0)
+        landmarks["eye"] = (170.0, 180.0, 1.0)  # eye 70px below a 20px ear gap
+        return landmarks
+
+    def test_a_dropped_head_alone_is_not_sleep(self):
+        # Sitting up straight and looking down is a posture problem, not a nap.
+        landmarks = upright()
+        landmarks["eye"] = (170.0, 180.0, 1.0)
+        detector = self.make(landmarks)
+        detector.set_baseline(12.0, 4.0)
+        for i in range(20):
+            reading = detector.process(frame=None, ts=i * 0.1)
+        self.assertFalse(reading["sleepy"])
+        self.assertGreater(reading["score"], 0.35)
+
+    def test_a_still_collapse_alone_is_not_sleep_without_a_dropped_head(self):
+        landmarks = slouching()  # collapsed, but the head is level
+        detector = self.make(landmarks)
+        detector.set_baseline(12.0, 4.0)
+        for i in range(20):
+            reading = detector.process(frame=None, ts=i * 0.1)
+        self.assertLess(reading["score"], 0.35)
+        self.assertFalse(reading["sleepy"])
+
+    def test_a_still_collapse_with_a_dropped_head_is_sleep(self):
         landmarks = upright()
         detector = self.make(landmarks)
         detector.set_baseline(12.0, 4.0)
-        # calibrate while sitting up: eye roughly level with the ear
-        detector.start_head_calibration(0.0, 1.0)
-        for i in range(12):
+        detector.start_head_calibration(0.0, 0.5)
+        for i in range(10):  # calibrate while sitting up
             detector.process(frame=None, ts=i * 0.1)
-        self.assertIsNotNone(detector.head_down_baseline)
         reference = detector.head_down_baseline
+        self.assertIsNotNone(reference)
 
-        # now stare down: about 45 degrees of tilt
-        landmarks["eye"] = (170.0, 180.0, 1.0)
-        for i in range(20):
-            reading = detector.process(frame=None, ts=2.0 + i * 0.1)
-        self.assertTrue(reading["phone"])
+        # Now they fold over and stop moving. The first frames after the change
+        # still count as movement, which is right: they have only just settled.
+        landmarks.clear()
+        landmarks.update(self.collapsed())
+        for i in range(40):
+            reading = detector.process(frame=None, ts=1.0 + i * 0.1)
+        self.assertTrue(reading["sleepy"])
         self.assertAlmostEqual(reading["head_ref_deg"], round(reference, 1), places=1)
-        self.assertGreater(reading["phone_delta_deg"], 20.0)
+        self.assertGreater(reading["head_drop_deg"], 20.0)
+        self.assertLess(reading["motion"], 0.006)
 
-    def test_phone_is_false_when_the_eye_is_hidden(self):
-        landmarks = upright()
+    def test_moving_keeps_them_awake(self):
+        # Same slumped pose, but fidgeting: awake, so not asleep.
+        landmarks = self.collapsed()
+        detector = self.make(landmarks)
+        detector.set_baseline(12.0, 4.0)
+        for i in range(30):
+            landmarks["knee"] = (200.0 + (20.0 if i % 2 else -20.0), 310.0, 1.0)
+            reading = detector.process(frame=None, ts=i * 0.1)
+        self.assertLess(reading["score"], 0.35)
+        self.assertGreater(reading["motion"], 0.006)
+        self.assertFalse(reading["sleepy"])
+
+    def test_a_hidden_eye_still_counts_as_head_down(self):
+        # A head dropped far enough usually takes the eye landmarks with it.
+        landmarks = self.collapsed()
         landmarks["eye"] = (170.0, 180.0, 0.01)
         detector = self.make(landmarks)
         detector.set_baseline(12.0, 4.0)
-        reading = detector.process(frame=None, ts=0.0)
+        for i in range(20):
+            reading = detector.process(frame=None, ts=i * 0.1)
         self.assertIsNone(reading["head_down_deg"])
-        self.assertFalse(reading["phone"])
+        self.assertTrue(reading["sleepy"])
+
+    def make(self, landmarks):
+        return PostureDetector(StubLandmarker(landmarks), tolerance=20.0)
 
     @unittest.skipUnless(HAVE_NUMPY and HAVE_CV2, "numpy + opencv required")
     def test_overlay_draws_without_error(self):

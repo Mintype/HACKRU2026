@@ -5,15 +5,15 @@ from server.state_machine import (
     AWAY,
     CALIBRATING,
     GOOD,
-    PHONE,
     ROASTED,
+    SLEEPING,
     SLOUCHING,
     PostureStateMachine,
     StateMachineConfig,
 )
 
 
-def reading(ts, score, *, person=True, seated=True, neck=15.0, torso=6.0, part=None, phone=False) -> Dict:
+def reading(ts, score, *, person=True, seated=True, neck=15.0, torso=6.0, part=None, sleepy=False) -> Dict:
     item = {
         "ts": float(ts),
         "person": person,
@@ -21,9 +21,10 @@ def reading(ts, score, *, person=True, seated=True, neck=15.0, torso=6.0, part=N
         "neck_angle": neck,
         "torso_angle": torso,
         "score": score,
-        "phone": phone,
-        "head_down_deg": 52.0 if phone else 6.0,
-        "phone_seconds": 0.0,
+        "sleepy": sleepy,
+        # Collapsed, motionless and head down: what the detector reports asleep.
+        "head_down_deg": 55.0 if sleepy else 6.0,
+        "motion": 0.001 if sleepy else 0.02,
     }
     if part is not None:
         item["slouch_part"] = part
@@ -282,44 +283,77 @@ class TestStateMachine(unittest.TestCase):
         self.assertIn("next_roast", snap)
         self.assertAlmostEqual(snap["next_roast"]["seconds"], 7.0, delta=0.6)
 
-    def test_phone_use_is_its_own_fault(self):
+    def test_sleep_is_its_own_fault_and_wins_over_slouch(self):
+        # Silence the posture triggers so this tests the sleep one alone.
+        self.machine.config.roast_seconds = 10_000.0
+        self.machine.config.bad_score_threshold = 0.0
         start = with_session(self.machine)
-        # sitting up perfectly well, but staring down at a phone
-        events = feed(self.machine, start, 2, 0.97, phone=True)
-        self.assertEqual(self.machine.state, PHONE)
-        self.assertEqual(self.machine.slouch_count, 0)
+
+        # Collapsed, motionless, head down: asleep, but only for 3 s so far.
+        events = feed(self.machine, start, 3, 0.2, sleepy=True)
         self.assertNotIn("roast_due", event_names(events))
+        # The pill only flips once the threshold has passed, not the instant the
+        # head drops.
+        self.assertEqual(self.machine.state, SLOUCHING)
 
-        events = feed(self.machine, start + 2, 10, 0.97, phone=True)
+        events = feed(self.machine, start + 3, 30, 0.2, sleepy=True)
         due = [e for e in events if e["event"] == "roast_due"]
-        self.assertEqual(len(due), 1)
-        self.assertEqual(due[0]["reason"], "phone")
-        self.assertTrue(due[0]["phone"])
-        # the pill stays on phone rather than flashing back to good
-        self.assertEqual(self.machine.state, PHONE)
+        self.assertEqual(due[0]["reason"], "sleeping")
+        self.assertTrue(due[0]["sleeping"])
+        # the pill stays on sleeping rather than flashing back to good
+        self.assertEqual(self.machine.state, SLEEPING)
 
-    def test_phone_roasts_repeat_every_cooldown(self):
+    def test_the_sleep_trigger_is_not_starved_by_the_slouch_trigger(self):
+        # A collapsed person gets a slouch roast every cooldown, which would
+        # hold the shared cooldown for ever. Sleeping has its own clock, so it
+        # still gets a turn.
+        start = with_session(self.machine)
+        events = feed(self.machine, start, 60, 0.2, sleepy=True)
+        due = [e for e in events if e["event"] == "roast_due"]
+        self.assertTrue(any(e["reason"] == "sleeping" for e in due))
+
+    def test_sleep_roasts_repeat_every_cooldown(self):
+        self.machine.config.roast_seconds = 10_000.0
+        self.machine.config.bad_score_threshold = 0.0
         self.machine.config.cooldown_seconds = 20.0
         start = with_session(self.machine)
-        events = feed(self.machine, start, 100, 0.97, phone=True)
+        events = feed(self.machine, start, 120, 0.2, sleepy=True)
         due = [e for e in events if e["event"] == "roast_due"]
         self.assertGreaterEqual(len(due), 4)
         gaps = [round(due[i + 1]["ts"] - due[i]["ts"], 1) for i in range(len(due) - 1)]
         self.assertTrue(all(gap >= 20.0 for gap in gaps), gaps)
 
-    def test_phone_trigger_can_be_disabled(self):
-        self.machine.config.phone_threshold_seconds = 0.0
+    def test_sleep_trigger_can_be_disabled(self):
+        self.machine.config.sleep_threshold_seconds = 0.0
         start = with_session(self.machine)
-        events = feed(self.machine, start, 30, 0.97, phone=True)
-        self.assertNotIn("roast_due", event_names(events))
-        self.assertEqual(self.machine.state, GOOD)
+        events = feed(self.machine, start, 60, 0.2, sleepy=True)
+        self.assertFalse(any(e.get("reason") == "sleeping" for e in events))
+        self.assertNotEqual(self.machine.state, SLEEPING)
 
-    def test_the_countdown_reports_the_phone(self):
+    def test_the_countdown_reports_the_slouch_trigger_until_sleep_is_ready(self):
         start = with_session(self.machine)
-        feed(self.machine, start, 3, 0.97, phone=True)
+        feed(self.machine, start, 3, 0.2, sleepy=True)
         info = self.machine.time_to_roast(start + 3)
-        self.assertEqual(info["trigger"], "phone")
-        self.assertAlmostEqual(info["seconds"], 7.0, delta=0.6)
+        # 3 s of stillness is not a nap yet, so the posture trigger still owns it
+        self.assertEqual(info["trigger"], "bad_posture")
+
+    def test_waking_up_clears_the_sleep_clock(self):
+        self.machine.config.roast_seconds = 10_000.0
+        self.machine.config.bad_score_threshold = 0.0
+        start = with_session(self.machine)
+        feed(self.machine, start, 20, 0.2, sleepy=True)
+        self.assertIsNotNone(self.machine.sleep_since)
+        feed(self.machine, start + 20, 2, 0.9, sleepy=False)
+        self.assertIsNone(self.machine.sleep_since)
+        self.assertFalse(self.machine.sleep_ready)
+
+    def test_the_sleep_trigger_owns_the_countdown_once_it_is_ready(self):
+        start = with_session(self.machine)
+        # 26 s of collapsed stillness: past the 25 s sleep threshold
+        feed(self.machine, start, 26, 0.2, sleepy=True)
+        info = self.machine.time_to_roast(start + 26)
+        self.assertEqual(info["trigger"], "sleeping")
+        self.assertIsNotNone(info["seconds"])
 
     def test_snapshot_fields(self):
         start = with_session(self.machine)

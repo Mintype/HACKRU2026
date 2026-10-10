@@ -69,39 +69,52 @@ only a *moderate* slouch (score between `lower_threshold` and
 `bad_score_threshold`) exercises the sustained timer. Set the threshold to 0 to
 disable the score trigger and use only the timer.
 
-## Phone use
+## Sleep detection
 
-A third fault, and deliberately **not** part of the posture score: someone can sit
-up perfectly straight and still stare into their lap.
+Sleeping is the one fault the posture score cannot name: a slumped person and a
+sleeping person measure the same. Phone detection used to live here and was
+**removed** — a head-tilt threshold guessed at a screen never matched a real camera.
+What replaced it is anchored on three signals, all of which must hold at once:
 
-It is a heuristic, not object detection — `angles.head_pitch()` measures the tilt of
-the ear→eye line against horizontal — but it is measured **relative to a
-reference**, not against a guessed angle: on session start the detector records the
-head tilt of "sitting up straight" for `calibration_seconds`, and looking down is
-`phone_pitch_delta` (~20°) of extra tilt past that. `phone_pitch_fallback` (~45°)
-is used only until a reference exists. A sustained tilt for `phone_delay` (~1.5 s)
-sets `phone` on the reading.
+| Signal | Where | Default |
+| ------ | ----- | ------- |
+| collapsed | `score <= sleep_score` | 0.35 |
+| motionless | `motion <= sleep_stillness`, where `motion` is the smoothed per-frame movement of ear/shoulder/hip/knee in normalized landmark units | 0.006 |
+| head down | `head_drop_deg >= sleep_head_delta`, or `head_down_deg is None` (a head dropped that far loses the eye landmarks) | 20° |
 
-That is what a phone, a lap and a keyboard have in common ("looking down for a long
-time"), which is why it is tunable rather than clever: the Debug panel shows
-`head_down_deg`, the reference and the difference, so the numbers can be read off a
-real camera instead of guessed. If phone detection never fires, check that row:
-`ref --` means calibration has not run yet (no session started).
+The head half reuses the calibrated reference: on `session_start` the camera thread
+calls `detector.start_head_calibration(ts, calibration_seconds)`, so a *dropped* head
+is measured against this person's own upright, never an absolute angle.
+`sleep_head_fallback` (~45°) applies only before a reference exists. The detector
+reports all of it (`head_down_deg`, `head_ref_deg`, `head_drop_deg`, `motion`,
+`sleepy`) and the Debug panel shows exactly those numbers.
 
-The state machine runs it outside the slouch machine (`_phone`): on `phone` it
-enters the `phone` state (red), and after `phone_threshold_seconds` (~10 s) fires
-`roast_due` with `reason="phone"`, repeating every `cooldown_seconds` like the other
-triggers. A phone roast does **not** transition to `roasted` — the pill stays on
-`phone` until the head comes up — and recovery to `good` is suppressed while the
-phone is active, so a good posture score cannot mask the fault.
+**Two traps worth knowing.** `motion` is an EMA, so a posture *change* counts as
+movement for a second or two — correct, they just moved. And a hidden eye does not
+block sleep: if the eye landmarks are gone the head half passes, because that is
+what a head dropped onto a desk looks like.
 
-The insults come from `voice/roasts.py:PHONE`, selected by `fault="phone"` in
-`fallback_batch`, and the prompt context gains a line saying this is not a posture
-problem. Test it without a camera:
+The state machine runs it outside the slouch machine (`_sleeping`), because the
+trigger is stillness, not an angle:
+
+- after `sleep_threshold_seconds` (**25 s**) the state goes `sleeping` (red) and it
+  fires `roast_due` with `reason="sleeping"`, repeating every `cooldown_seconds`;
+- **once it is ready the slouch trigger stands down.** This matters: a collapsed
+  person otherwise gets a slouch roast every cooldown for ever, taking the one
+  shared cooldown every time it comes free, and the sleep roast is starved. Test
+  that it is not: `test_the_sleep_trigger_is_not_starved_by_the_slouch_trigger`.
+- a sleep roast does **not** transition to `roasted` — the pill stays on `sleeping`
+  — and recovery to `good` is suppressed while they are still out;
+- if they move, the state hands back to `slouching` for the same episode rather than
+  sitting on a stale `sleeping` pill.
+
+The insults come from `voice/roasts.py:SLEEPING`, selected by `fault="sleeping"` in
+`fallback_batch`, and the prompt context gains a line saying they nodded off. Test it
+without a camera:
 
 ```bash
-python .pi/skills/posture-coach-vision/scripts/roast_timeline.py --profile phone --seconds 40
-python run.py --simulate                 # the scripted feed has a phone phase
+python .pi/skills/posture-coach-vision/scripts/roast_timeline.py --profile sleeping --seconds 60
+python run.py --simulate                 # the scripted feed has a 45 s sleep phase
 ```
 
 ## Sit-down detection

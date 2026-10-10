@@ -78,14 +78,27 @@ Originality comes from two more levers:
   token with a random entry from `voice/roasts.py:TOPICS` (write as the chair,
   blame gravity, write as their back's warranty department…), so batches do not
   converge on the same joke. Add angles by adding to `TOPICS`.
-- **Substantial offline pools.** ~20 lines per tier plus 10 neck-, 10 torso- and
-  10 phone-specific lines, because the hand-written set is finite: once a tier is
+- **Substantial offline pools.** ~20 lines per tier plus 12 neck-, 12 torso- and
+  10 sleep-specific lines, because the hand-written set is finite: once a tier is
   exhausted it degrades to a repeat rather than going silent. Gemini is what
-  provides unlimited originals.
+  provides unlimited originals. Keep them **short** (the prompt asks for 3-9 words,
+  `MAX_WORDS` throws away anything past 11) and keep the food imagery to a couple
+  of lines per pool: the chef persona is the delivery, not a quota.
 - **Aimed batches.** `fallback_batch(part=…)` mixes in neck/torso lines, and
-  `fault="phone"` overrides that with the phone pool when the fault is not the
+  `fault="sleeping"` overrides that with the sleep pool when the fault is not the
   posture at all (`FAULT_LINES`). `RoastService` passes both from the context, and
-  `gemini_text` does the same so the model gets a phone line in its context.
+  `gemini_text` does the same so the model gets a "they nodded off" line in its
+  context.
+
+## The persona
+
+The chef is the *delivery*, not the content: `voice/prompts/roast.txt` casts the
+model as a furious chef inspecting a dish it did not order (the posture — RAW,
+under-seasoned, badly plated) and asks for **3-9 words** and **one sharp comparison
+when it earns its place**. Food and kitchens are the house speciality but explicitly
+a **garnish, not the whole dish** — a plain furious line beats a forced food joke.
+If you make it funnier by adding a requirement, add it to the prompt file *and* to
+the offline pools, or the persona only exists when the API does.
 
 ## Invariants
 

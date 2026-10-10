@@ -1,7 +1,8 @@
 """The vision module proper: frame -> :class:`Reading`.
 
-Also owns sit-down detection (thigh close to horizontal for ~2 s) and the
-temporary "away" state used when a desk hides the knee.
+Also owns sit-down detection (thigh close to horizontal for ~2 s), the
+temporary "away" state used when a desk hides the knee, and sleep detection
+(slumped, motionless, head down for a while).
 """
 
 from __future__ import annotations
@@ -27,19 +28,28 @@ class PostureDetector:
         seated_delay: float = 2.0,
         standup_delay: float = 1.0,
         min_visibility: float = 0.3,
-        phone_pitch_delta: float = 20.0,
-        phone_pitch_fallback: float = 45.0,
-        phone_delay: float = 1.5,
+        sleep_score: float = 0.35,
+        sleep_stillness: float = 0.006,
+        sleep_head_delta: float = 20.0,
+        sleep_head_fallback: float = 45.0,
     ):
         self.landmarker = landmarker
         self.tolerance = float(tolerance)
+        self.alpha = float(alpha)
         self.seated_threshold = float(seated_threshold)
         self.seated_delay = float(seated_delay)
         self.standup_delay = float(standup_delay)
         self.min_visibility = float(min_visibility)
-        self.phone_pitch_delta = float(phone_pitch_delta)
-        self.phone_pitch_fallback = float(phone_pitch_fallback)
-        self.phone_delay = float(phone_delay)
+        #: Collapsed posture: the score at or below which a slump is a slump.
+        self.sleep_score = float(sleep_score)
+        #: Movement per frame (normalized landmark units) below which they count
+        #: as motionless. Sleep is the still kind of collapse; awake slouching
+        #: fidgets.
+        self.sleep_stillness = float(sleep_stillness)
+        #: Head tilt past the calibrated head level that counts as a dropped head.
+        self.sleep_head_delta = float(sleep_head_delta)
+        #: Absolute tilt used only until a head reference has been measured.
+        self.sleep_head_fallback = float(sleep_head_fallback)
 
         self.baseline = dict(DEFAULT_BASELINE)
         self.calibrated = False
@@ -49,8 +59,10 @@ class PostureDetector:
         self._seated_since: Optional[float] = None
         self._away_since: Optional[float] = None
         self._hip_ref = None
-        self._phone_since: Optional[float] = None
-        #: Head tilt recorded during calibration, so "looking down" is measured
+        #: Smoothed joint movement per frame, the stillness half of sleep.
+        self._motion = 0.0
+        self._prev_points: Optional[Dict[str, tuple]] = None
+        #: Head tilt recorded during calibration, so a dropped head is measured
         #: against this person and this camera rather than a guessed angle.
         self.head_down_baseline: Optional[float] = None
         self._head_calib_until: Optional[float] = None
@@ -66,14 +78,13 @@ class PostureDetector:
     def start_head_calibration(self, ts: float, duration: float) -> None:
         """Record the head tilt of "sitting up straight" for a few seconds.
 
-        Without this the phone rule would need an absolute angle, which depends
+        Without this a dropped head would need an absolute angle, which depends
         on the camera height, the chair and the person. Relative to a measured
         level it needs no guessing.
         """
         self._head_calib_until = float(ts) + max(0.5, float(duration))
         self._head_samples = []
         self.head_down_baseline = None
-        self._phone_since = None
 
     def _finish_head_calibration(self, ts: float) -> None:
         if self._head_samples:
@@ -89,7 +100,8 @@ class PostureDetector:
         if landmarks is None:
             self._seated_since = None
             self.seated = False
-            self._phone_since = None
+            self._prev_points = None
+            self._motion = 0.0
             return self._reading(ts, person=False, seated=False, neck=None, torso=None, thigh=None)
 
         ear, shoulder, hip, knee = (
@@ -104,61 +116,84 @@ class PostureDetector:
         thigh = angles.thigh_angle(hip, knee) if knee[2] >= self.min_visibility else None
 
         eye = landmarks.get("eye")
-        wrist = landmarks.get("wrist")
         head_down = angles.head_pitch(eye, ear) if eye is not None and eye[2] >= self.min_visibility else None
         if head_down is not None and self._head_calib_until is not None:
             if ts <= self._head_calib_until:
                 self._head_samples.append(head_down)
             else:
                 self._finish_head_calibration(ts)
-        # Hands off the lap: the classic holding-a-phone pose, shown for tuning.
-        hands_up = bool(wrist is not None and wrist[2] >= self.min_visibility and wrist[1] < hip[1])
-        phone = self._update_phone(ts, head_down)
 
-        seated = self._update_seated(ts, thigh, torso, hip)
-        reading = self._reading(ts, person=True, seated=seated, neck=neck, torso=torso, thigh=thigh)
-        reading["points"] = {
+        points = {
             "ear": (ear[0], ear[1]),
             "shoulder": (shoulder[0], shoulder[1]),
             "hip": (hip[0], hip[1]),
             "knee": (knee[0], knee[1]),
         }
+        motion = self._update_motion(points)
+
+        seated = self._update_seated(ts, thigh, torso, hip)
+        reading = self._reading(ts, person=True, seated=seated, neck=neck, torso=torso, thigh=thigh)
+        reading["points"] = points
         reading["side"] = landmarks.get("side", "right")
         reading["head_down_deg"] = round(head_down, 1) if head_down is not None else None
         reading["head_ref_deg"] = (
             round(self.head_down_baseline, 1) if self.head_down_baseline is not None else None
         )
-        reading["phone_delta_deg"] = (
+        reading["head_drop_deg"] = (
             round(head_down - self.head_down_baseline, 1)
             if head_down is not None and self.head_down_baseline is not None
             else None
         )
-        reading["hands_up"] = hands_up
-        reading["phone"] = phone
-        reading["phone_seconds"] = (
-            round(ts - self._phone_since, 1) if phone and self._phone_since is not None else 0.0
-        )
+        reading["motion"] = round(motion, 4)
+        reading["sleepy"] = self._is_sleepy(reading.get("score"), motion, head_down)
         return reading
 
-    def _update_phone(self, ts: float, head_down: Optional[float]) -> bool:
-        """Sustained head-down: what a phone, a lap or a keyboard all look like.
+    def _update_motion(self, points: Dict[str, tuple]) -> float:
+        """How much the joints moved since the last frame, smoothed.
 
-        Measured against the head tilt recorded during calibration, so it needs
-        no guessed angle: looking down is ``phone_pitch_delta`` degrees of extra
-        tilt past level. ``phone_pitch_fallback`` is used only until a reference
-        has been measured.
+        Landmarks are normalized to 0..1, so this number means the same thing on
+        any camera. Stillness is what separates a sleeping slump from an awake
+        one, so it is measured rather than assumed.
         """
-        if self.head_down_baseline is not None:
-            threshold = self.head_down_baseline + self.phone_pitch_delta
-        else:
-            threshold = self.phone_pitch_fallback
-        looking_down = head_down is not None and head_down >= threshold
-        if not looking_down:
-            self._phone_since = None
+        previous = self._prev_points
+        self._prev_points = dict(points)
+        if not previous:
+            self._motion = 0.0
+            return 0.0
+        total = 0.0
+        counted = 0
+        for key, (x, y) in points.items():
+            old = previous.get(key)
+            if not old:
+                continue
+            total += abs(x - old[0]) + abs(y - old[1])
+            counted += 1
+        if not counted:
+            self._motion = 0.0
+            return 0.0
+        moved = total / counted
+        self._motion += self.alpha * (moved - self._motion)
+        return self._motion
+
+    def _is_sleepy(self, score: Optional[float], motion: float, head_down: Optional[float]) -> bool:
+        """Slumped, motionless and head down: the shape of a nap in a chair.
+
+        Honest about its limits: pose alone cannot see closed eyes, so this is
+        really "collapsed and not moving for a while". Someone wide awake and
+        perfectly still while reading deeply will also look like this, which is
+        why the state machine waits ``sleep_threshold_seconds`` before shouting.
+        """
+        if score is None or score > self.sleep_score:
             return False
-        if self._phone_since is None:
-            self._phone_since = ts
-        return (ts - self._phone_since) >= self.phone_delay
+        if motion is None or motion > self.sleep_stillness:
+            return False
+        if head_down is None:
+            # No eye landmarks at all: a head dropped out of frame is itself a
+            # strong signal, so do not hold the collapse back for a missing eye.
+            return True
+        if self.head_down_baseline is not None:
+            return (head_down - self.head_down_baseline) >= self.sleep_head_delta
+        return head_down >= self.sleep_head_fallback
 
     # -- sit-down detection ----------------------------------------------
     def _update_seated(self, ts: float, thigh: Optional[float], torso: float, hip) -> bool:
@@ -212,10 +247,9 @@ class PostureDetector:
                 "slouch_part": None,
                 "head_down_deg": None,
                 "head_ref_deg": None,
-                "phone_delta_deg": None,
-                "hands_up": False,
-                "phone": False,
-                "phone_seconds": 0.0,
+                "head_drop_deg": None,
+                "motion": None,
+                "sleepy": False,
             }
 
         neck_score = angles.posture_score(neck, self.baseline["neck"], self.tolerance)
@@ -250,10 +284,9 @@ class PostureDetector:
             "slouch_part": part,
             "head_down_deg": None,
             "head_ref_deg": None,
-            "phone_delta_deg": None,
-            "hands_up": False,
-            "phone": False,
-            "phone_seconds": 0.0,
+            "head_drop_deg": None,
+            "motion": None,
+            "sleepy": False,
         }
 
     # -- overlay ----------------------------------------------------------

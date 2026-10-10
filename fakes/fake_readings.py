@@ -3,7 +3,7 @@
 Produces a believable, repeating sequence of readings so the server, state
 machine and website can be developed (and demoed) without the camera::
 
-    away -> good -> slouch (roast) -> good -> slouch -> away ...
+    away -> good -> sleep (roast) -> good -> slouch -> away ...
 
 Run directly to print JSON readings at ~1 Hz, which is handy for poking at the
 website while the real vision code is still being written::
@@ -22,12 +22,14 @@ from typing import Dict, Iterator, Optional, Sequence, Tuple
 BASELINE_NECK = 12.0
 BASELINE_TORSO = 4.0
 
-#: (phase, seconds) -- repeats forever.
+#: (phase, seconds) -- repeats forever.  The sleep phase is long on purpose: the
+#: state machine waits ``sleep_threshold_seconds`` (25 s by default) *and* for a
+#: free cooldown slot, so a 20-odd second phase would never prove the trigger.
 DEFAULT_SCRIPT: Sequence[Tuple[str, float]] = (
     ("away", 3.0),
     ("good", 9.0),
-    ("phone", 22.0),
-    ("good", 10.0),
+    ("sleep", 45.0),
+    ("good", 8.0),
     ("slouch", 36.0),
     ("good", 10.0),
     ("slouch", 20.0),
@@ -75,22 +77,23 @@ def scripted_readings(
                         "slouch_part": None,
                         "head_down_deg": None,
                         "head_ref_deg": None,
-                        "phone_delta_deg": None,
-                        "hands_up": False,
-                        "phone": False,
-                        "phone_seconds": 0.0,
+                        "head_drop_deg": None,
+                        "motion": None,
+                        "sleepy": False,
                         "sim": True,
                         "phase": phase,
                     }
                 else:
-                    # "phone" is the interesting one: sitting up fine, but staring
-                    # into a phone, so the score is good and the phone fault fires.
+                    # "sleep" is the interesting one: slumped over, not moving at
+                    # all, head down past the calibrated level, for a long time.
                     if phase == "slouch":
                         drift = _ramp(elapsed, min(duration * 0.45, 14.0))
+                    elif phase == "sleep":
+                        # Collapses in a few seconds, then never moves again.
+                        drift = _ramp(elapsed, 4.0)
                     else:
                         drift = 0.0
                     seated = True
-                    phone = phase == "phone"
 
                     neck = BASELINE_NECK + drift * 30.0 + rng.uniform(-1.2, 1.2)
                     torso = BASELINE_TORSO + drift * 14.0 + rng.uniform(-0.8, 0.8)
@@ -105,7 +108,19 @@ def scripted_readings(
                         part = "torso"
                     else:
                         part = "even"
-                    head_down = round(52.0 + rng.uniform(-3.0, 3.0), 1) if phone else round(rng.uniform(2.0, 9.0), 1)
+                    # Sleepy on the same terms the detector uses: collapsed, and
+                    # (from the motion field below) not moving at all.
+                    sleepy = phase == "sleep" and score <= 0.35
+                    motion = (
+                        round(0.0006 + rng.uniform(0.0, 0.0005), 5)
+                        if sleepy
+                        else round(0.018 + rng.uniform(0.0, 0.012), 5)
+                    )
+                    head_down = (
+                        round(55.0 + rng.uniform(-2.0, 2.0), 1)
+                        if sleepy
+                        else round(rng.uniform(2.0, 9.0), 1)
+                    )
                     reading = {
                         "ts": ts,
                         "person": True,
@@ -121,10 +136,9 @@ def scripted_readings(
                         "slouch_part": part,
                         "head_down_deg": head_down,
                         "head_ref_deg": 6.0,
-                        "phone_delta_deg": round(head_down - 6.0, 1),
-                        "hands_up": phone,
-                        "phone": phone,
-                        "phone_seconds": round(elapsed, 1) if phone else 0.0,
+                        "head_drop_deg": round(head_down - 6.0, 1),
+                        "motion": motion,
+                        "sleepy": sleepy,
                         "sim": True,
                         "phase": phase,
                     }

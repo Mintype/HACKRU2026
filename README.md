@@ -106,14 +106,17 @@ frame:
   "ts": 1760101234.5, "person": true, "seated": true,
   "neck_angle": 18.4, "torso_angle": 7.1, "score": 0.86,
   "neck_drift": 6.4, "torso_drift": 3.1, "slouch_part": "neck",
-  "head_down_deg": 8.0, "phone": false, "phone_seconds": 0.0, "hands_up": false
+  "head_down_deg": 8.0, "head_ref_deg": 6.0, "head_drop_deg": 2.0,
+  "motion": 0.021, "sleepy": false
 }
 ```
 
 `slouch_part` says which part is giving way (`neck`, `torso` or `even`), and the
-drifts are how far each angle has moved past the baseline. `head_down_deg` is how
-far the head is tilted down, and `phone` is the sustained-head-down heuristic
-built on it. The roasts use all of it.
+drifts are how far each angle has moved past the baseline. The last four fields
+are the raw material for sleep detection: `head_down_deg` is the head tilt,
+`head_ref_deg` is the tilt recorded while calibrating, `head_drop_deg` is the
+difference, and `motion` is how much the joints moved since the last frame.
+`sleepy` is vision's instant verdict on all of it. The roasts use all of it.
 
 ### 2. Calibration and sit-down detection
 
@@ -138,6 +141,7 @@ events. Its whole vocabulary is six states:
 | `good` | score above the upper threshold | score drops below the lower threshold |
 | `slouching` | score below the lower threshold | good again, or the roast timer elapses |
 | `roasted` | a roast was just played | good again (after the debounce) |
+| `sleeping` | collapsed, motionless and head down past the sleep threshold | moves or sits up again |
 
 Hysteresis stops the state flickering: it **enters** slouching below
 `lower_threshold` (0.70) and only **returns** to good above `upper_threshold`
@@ -175,11 +179,13 @@ of an insult maps to stability/style numbers (see the table below).
 ### The chef
 
 The roast prompt casts the model as **a furious chef inspecting a dish it did not
-order: your posture** — everything is RAW, under-seasoned, badly plated — and it
-requires **one vivid comparison per line**, with food as the house speciality (a raw
-chicken, a collapsed soufflé, a soggy bottom). Nice mode is the same chef, delighted.
-The writing angles in `voice/roasts.py:TOPICS` include kitchen angles, and the
-offline pools carry chef lines too, so the persona survives without an API key.
+order: your posture** — everything is RAW, under-seasoned, badly plated. The lines
+stay short (**3–9 words**) and land one sharp comparison when it earns its place:
+food and kitchens are the house speciality, but they are a **garnish, not the whole
+dish**, because a plain furious line beats a forced food joke. Nice mode is the same
+chef, delighted. The writing angles in `voice/roasts.py:TOPICS` include a few kitchen
+angles, and the offline pools carry chef lines too, so the persona survives without
+an API key.
 
 ### Never repeating, and never boring. Every insult actually said is appended to
 `data/insults.txt`, one per line. That ledger is enforced in four places:
@@ -240,10 +246,12 @@ cooldown:
 | ------- | --------- | ------- |
 | **sustained slouch** | score below `lower_threshold` for `roast_seconds` | 0.70 for 10 s |
 | **bad posture** | score below `bad_score_threshold` held for `bad_score_seconds` | 0.45 for 3 s |
-| **phone** | head down — `head_down_deg` that much past the level recorded during calibration — for `phone_threshold_seconds` | 10 s |
+| **sleeping** | collapsed, motionless and head down for `sleep_threshold_seconds` | 25 s |
 
-The phone trigger is separate on purpose: someone can sit up perfectly straight and
-still stare into their lap, and the posture score says nothing about it.
+The sleep trigger is separate on purpose, and it is the slowest and least certain
+one: see [Sleep detection](#sleep-detection) below. Once it is ready it takes over
+from the slouch trigger, so you get "wake up" instead of a fourth "sit up" while
+you are face-down on the desk.
 
 ```
 sit down ──2s─▶ seated ──5s─▶ calibrated ──▶ slouch ──▶ ROAST
@@ -291,6 +299,38 @@ t= 15.3s  roast_due   reason=sustained_slouch  slouch#1  part=neck  score=0.55
  "slouch_part": "neck", "slouch_seconds": 12.6, "score": 0.31}
 ```
 
+### Sleep detection
+
+Sleeping is the one fault a posture score cannot name: a slumped person and a
+sleeping person measure the same. So it is detected from **three signals at once**,
+all of which must hold:
+
+| Signal | Measures | Default |
+| ------ | -------- | ------- |
+| collapsed | `score` at or below `sleep_score` | 0.35 |
+| motionless | joint movement per frame below `sleep_stillness` | 0.006 |
+| head down | `head_drop_deg` past `sleep_head_delta`, or the eye landmarks gone entirely (a head dropped that far is usually out of frame) | 20° |
+
+All three must hold for `sleep_threshold_seconds` (25 s) before anything is said,
+and then the state goes **`sleeping`** (red, like every other bad state) and the
+insults come from the hand-written `SLEEPING` pool or the model's own sleep angle.
+
+**Be honest about what this is.** MediaPipe pose cannot see closed eyes, so this is
+really *"collapsed and completely still for twenty-five seconds"* — a very still
+person reading a dense document will look the same. That is why it is slow, why the
+threshold is a setting, and why the Debug panel shows every input: **Motion**,
+**Head down** (value, calibrated reference, difference) and **Sleeping**.
+
+```bash
+python .pi/skills/posture-coach-vision/scripts/roast_timeline.py --profile sleeping
+# t=  8.3s  roast_due  reason=bad_posture  ...
+# t= 38.3s  roast_due  reason=sleeping     (+10.0s since the last roast)
+```
+
+While the sleep trigger is ready the slouch trigger stands down: otherwise the
+slouch roast would take the one shared cooldown every time it came free and the
+sleep roast would never get a turn.
+
 ---
 
 ## Reference: every number and option
@@ -315,7 +355,7 @@ overrides a changed default, which is how a "10 second" roast can keep taking 30
 | `upper_threshold` | `0.80` | 0.05–1.0 | Score **above** this ⇒ good. Between the two thresholds the state does not change. |
 | `bad_score_threshold` | `0.45` | 0–1.0 | The deep-slouch score that roasts without waiting out `roast_seconds`. `0` disables this trigger. |
 | `bad_score_seconds` | `3` | 0–60 | How long the bad score must hold before that trigger fires, so one noisy frame cannot cost an API call. |
-| `phone_threshold_seconds` | `10` | 0–600 | How long they may stare down at a phone/device before being roasted. `0` disables it. |
+| `sleep_threshold_seconds` | `25` | 0–600 | How long they may be collapsed, motionless and head down before being accused of sleeping. `0` disables the trigger. |
 | `delta_angle` | `20` | 1–60 | Tolerance: how many degrees past the baseline map to a score of `0`. Smaller ⇒ more sensitive. |
 
 ### Vision parameters
@@ -332,9 +372,10 @@ rather than website settings.
 | `seated_delay` | `2 s` | How long that must hold before a session starts, so someone still sitting down is not roasted. |
 | `standup_delay` | `1 s` | How long "not seated" must hold before the state goes `away`. |
 | `min_visibility` | `0.3` | Knee/eye visibility below which that landmark is ignored. |
-| `phone_pitch_delta` | `20°` | Extra downward tilt, past the head level recorded while calibrating, that counts as looking down. Relative on purpose: there is no camera angle to guess. |
-| `phone_pitch_fallback` | `45°` | Absolute angle used only until a head reference has been measured. |
-| `phone_delay` | `1.5 s` | How long the head must stay down before it counts as phone use, so a glance down does not trigger it. |
+| `sleep_score` | `0.35` | Collapsed: the score at or below which the slump counts as a slump. |
+| `sleep_stillness` | `0.006` | Movement per frame (normalized landmark units) below which they count as motionless. Watch the Debug panel's **Motion** row to tune it: a fidgeting person is an order of magnitude above it. |
+| `sleep_head_delta` | `20°` | Extra downward tilt, past the head level recorded while calibrating, that counts as a dropped head. |
+| `sleep_head_fallback` | `45°` | Absolute tilt used only until a head reference has been measured. |
 | `model` | `lite` | MediaPipe pose model: `lite`, `full` or `heavy`. `lite` is the one that keeps 10+ fps on a Pi. |
 | `fps_target` | `10` | Frames per second the vision loop aims for. Posture changes slowly; 5 fps of detection is still enough. |
 | `jpeg_quality` | `70` | JPEG quality for the shared frame that `/video_feed` serves. |
@@ -438,7 +479,7 @@ offender does not sound like a first slip.
 
 | Flag | Meaning |
 | ---- | ------- |
-| `--simulate` / `--fake` | Scripted readings + synthetic feed. No camera, no MediaPipe needed. |
+| `--simulate` / `--fake` | Scripted readings + synthetic feed. No camera, no MediaPipe needed. The script is a repeating loop: away → good → **sleep** (long enough to trip the slow trigger) → good → slouch → good → slouch. |
 | `--demo` | Short thresholds for a fast demo: roast 10 s, cooldown 15 s, calibration 3 s, pool 2/tier. Applied in memory, not saved. |
 | `--preview` | Standalone OpenCV window instead of the website. Best way to aim the camera. |
 | `--video FILE` | Run the real detector against a recording instead of the webcam. |
@@ -510,7 +551,7 @@ Deliberately blunt, so a glance is enough:
 | Colour | Means |
 | ------ | ----- |
 | **green** | good posture — score above the upper threshold |
-| **red** | bad posture — `slouching`, `roasted` and `phone` are the same badness, only the pill text distinguishes them |
+| **red** | bad posture — `slouching`, `roasted` and `sleeping` are the same badness, only the pill text distinguishes them |
 | amber | undecided: the score is in the narrow band between the two thresholds, so the state has not changed yet |
 | grey | `away` — nobody seated, so nothing is judged |
 | blue | `calibrating` |
@@ -533,8 +574,9 @@ Score          0.00   raw 0.00
 Neck           41.8°   +29.8°
 Torso          18.1°   +14.1°
 Failing part   neck
-Phone          yes  8.3s
-Head down      49°
+Sleeping       yes  26.4s / 25s
+Motion         0.0011
+Head down      49°   ref 6°   +43°
 Slouched       8.7s
 Next roast     8.2s   cooldown      <- the countdown, and what is holding it
 Cooldown       8.2s
@@ -597,6 +639,8 @@ Rebooting should bring the website back by itself within a minute.
 | Insults repeat, or sound generic | Gemini is not writing them — the model was retired (a 404 in the log) and the offline pools are being used | check `Gemini is writing roasts with …` in the log, or run `probe_tts.py --live` to see which model answers; the chain picks a live one, and `GEMINI_TEXT_MODEL` sets which to try first |
 | Roasts repeat | the hand-written fallback pool is finite | add a Gemini key so roasts are written fresh; check `data/insults.txt` |
 | Roasts are silent but captions appear | audio route, or the Bluetooth link dropped | try **Voice → Local**, switch the route to cast, and confirm the Nest is paired |
+| Sleep never fires | it needs all three signals at once, for 25 s: collapsed, motionless *and* head down | watch the **Sleeping**, **Motion** and **Head down** rows on the Debug panel; if Motion stays high they are fidgeting (correct), and if Head down shows `ref --` no head reference has been measured yet |
+| Sleep fires while awake | they were genuinely motionless and slumped for 25 s | raise **Sleep after (s)**, or lower `sleep_stillness` in `vision/detector.py` so tiny movements count as movement |
 | Under ~8 fps, laggy overlay | an oversized model | `--model lite`, smaller frames, or detect on every second frame |
 | `could not open camera 0` | another program has it, or the wrong index | `run.py --list-cameras`, then `--camera N` |
 | Page looks stale after an edit | Flask caches the template, and the browser caches CSS/JS | restart the server and hard-refresh (`Ctrl+F5`) |
