@@ -292,6 +292,10 @@
     else document.documentElement.requestFullscreen?.();
   }
 
+  function syncFullscreenIcon() {
+    document.body.classList.toggle("is-fullscreen", !!document.fullscreenElement);
+  }
+
   function bindTopbar() {
     $("btn-panels").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -344,7 +348,10 @@
       else if (ev.key === "Escape") toggleMenu(false);
     });
 
-    document.addEventListener("fullscreenchange", resizeChart);
+    document.addEventListener("fullscreenchange", () => {
+      syncFullscreenIcon();
+      resizeChart();
+    });
     window.addEventListener("resize", () => {
       clampAll();
       resizeChart();
@@ -424,17 +431,7 @@
       ctx.restore();
     });
 
-    ctx.strokeStyle = "rgba(233,235,239,.9)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    series.forEach((point, i) => {
-      const x = xOf(point.ts);
-      const y = yOf(point.score);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-
+    // Roast markers sit behind the trace.
     ctx.save();
     ctx.setLineDash([3, 3]);
     ctx.strokeStyle = "rgba(217,128,128,.8)";
@@ -448,10 +445,53 @@
     });
     ctx.restore();
 
+    // The trace is coloured by score through one vertical ramp: green up top,
+    // amber at the warn/roast thresholds, red down low. The colour is the data.
+    const ramp = ctx.createLinearGradient(0, pad.t, 0, pad.t + plotH);
+    ramp.addColorStop(0.0, "#7fc48d");
+    ramp.addColorStop(0.19, "#7fc48d");
+    ramp.addColorStop(0.3, "#d8b25c");
+    ramp.addColorStop(0.5, "#cf9468");
+    ramp.addColorStop(1.0, "#d98080");
+
+    const trace = new Path2D();
+    series.forEach((point, i) => {
+      const x = xOf(point.ts);
+      const y = yOf(point.score);
+      if (i === 0) trace.moveTo(x, y);
+      else trace.lineTo(x, y);
+    });
+
+    if (series.length > 1) {
+      const area = new Path2D(trace);
+      area.lineTo(xOf(series[series.length - 1].ts), pad.t + plotH);
+      area.lineTo(xOf(series[0].ts), pad.t + plotH);
+      area.closePath();
+      ctx.save();
+      ctx.globalAlpha = 0.11;
+      ctx.fillStyle = ramp;
+      ctx.fill(area);
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.strokeStyle = ramp;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.stroke(trace);
+    ctx.restore();
+
     const last = series[series.length - 1];
-    ctx.fillStyle = STATE_COLOR[last.state] || "#e9ebef";
+    const lx = xOf(last.ts);
+    const ly = yOf(last.score);
     ctx.beginPath();
-    ctx.arc(xOf(last.ts), yOf(last.score), 3.5, 0, Math.PI * 2);
+    ctx.arc(lx, ly, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(10,12,16,.7)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(lx, ly, 2.6, 0, Math.PI * 2);
+    ctx.fillStyle = STATE_COLOR[last.state] || "#e9ebef";
     ctx.fill();
   }
 
@@ -465,7 +505,7 @@
     if (!next || next === currentState) return;
     currentState = next;
     const chip = $("state-chip");
-    chip.className = "chip " + (STATE_CLASS[next] || "state-away");
+    chip.className = "state " + (STATE_CLASS[next] || "state-away");
     $("state-text").textContent = next;
     $("calib").classList.toggle("show", next === "calibrating");
   }
@@ -574,14 +614,9 @@
 
   function connect() {
     const source = new EventSource("/events");
-    source.onopen = () => {
-      $("conn").className = "chip conn online";
-      $("conn-text").textContent = "live";
-    };
-    source.onerror = () => {
-      $("conn").className = "chip conn offline";
-      $("conn-text").textContent = "reconnecting";
-    };
+    // No idle "live" badge: the HUD is only marked when the stream actually drops.
+    source.onopen = () => $("conn").classList.add("hidden");
+    source.onerror = () => $("conn").classList.remove("hidden");
     source.onmessage = (message) => {
       let data;
       try {

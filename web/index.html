@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Posture Coach</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='%23c9ced6' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='11' cy='5' r='2.4'/%3E%3Cpath d='M11 7.4V14h7v6'/%3E%3C/g%3E%3C/svg%3E" />
+<link rel="stylesheet" href="{{ url_for('static', filename='fonts.css') }}" />
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
 <body>
@@ -38,9 +39,12 @@
     <span class="brand-name">Posture&nbsp;Coach</span>
   </div>
 
-  <div id="state-chip" class="chip state-away">
-    <span class="chip-dot"></span><span id="state-text">away</span>
+  <div id="state-chip" class="state state-away">
+    <i class="state-bar"></i><span id="state-text">away</span>
   </div>
+
+  <!-- Only surfaces when the event stream actually drops. -->
+  <div id="conn" class="state offline hidden"><i class="state-bar"></i><span>offline</span></div>
 
   <div id="session-clock" class="mono muted">no session</div>
 
@@ -48,13 +52,26 @@
 
   <div id="hud-fps" class="mono muted">&mdash;</div>
 
-  <div id="conn" class="chip conn offline">
-    <span class="chip-dot"></span><span id="conn-text">connecting</span>
-  </div>
+  <button id="btn-panels" class="icon-btn" title="Panels (P)" aria-label="Panels">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+    </svg>
+  </button>
 
-  <button id="btn-panels" class="ibtn" title="Add or hide panels (P)">Panels</button>
-  <button id="btn-mirror" class="ibtn" title="Mirror the video (M)">Mirror</button>
-  <button id="btn-fullscreen" class="ibtn" title="Fullscreen (F)">Full</button>
+  <button id="btn-mirror" class="icon-btn" title="Mirror camera (M)" aria-label="Mirror camera">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+    </svg>
+  </button>
+
+  <button id="btn-fullscreen" class="icon-btn" title="Fullscreen (F)" aria-label="Toggle fullscreen">
+    <svg class="icon icon-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+    </svg>
+    <svg class="icon icon-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25" />
+    </svg>
+  </button>
 </header>
 
 <!-- Panel menu ------------------------------------------------------------ -->
@@ -68,7 +85,7 @@
   </label>
   <div class="menu-sep"></div>
   <div class="menu-actions">
-    <button id="btn-reset-layout" class="ibtn">Reset layout</button>
+    <button id="btn-reset-layout" class="btn">Reset layout</button>
   </div>
 </div>
 
@@ -79,8 +96,12 @@
     <header class="panel-head">
       <h2>Posture</h2>
       <div class="panel-actions">
-        <button class="panel-btn" data-action="collapse" title="Collapse">&ndash;</button>
-        <button class="panel-btn" data-action="hide" title="Hide">&times;</button>
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
       </div>
     </header>
     <div class="panel-body">
@@ -106,8 +127,12 @@
     <header class="panel-head">
       <h2>Session</h2>
       <div class="panel-actions">
-        <button class="panel-btn" data-action="collapse" title="Collapse">&ndash;</button>
-        <button class="panel-btn" data-action="hide" title="Hide">&times;</button>
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
       </div>
     </header>
     <div class="panel-body">
@@ -124,8 +149,12 @@
     <header class="panel-head">
       <h2>Score</h2>
       <div class="panel-actions">
-        <button class="panel-btn" data-action="collapse" title="Collapse">&ndash;</button>
-        <button class="panel-btn" data-action="hide" title="Hide">&times;</button>
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
       </div>
     </header>
     <div class="panel-body">
@@ -138,8 +167,12 @@
     <header class="panel-head">
       <h2>Controls</h2>
       <div class="panel-actions">
-        <button class="panel-btn" data-action="collapse" title="Collapse">&ndash;</button>
-        <button class="panel-btn" data-action="hide" title="Hide">&times;</button>
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
       </div>
     </header>
     <div class="panel-body">
@@ -173,8 +206,12 @@
     <header class="panel-head">
       <h2>System</h2>
       <div class="panel-actions">
-        <button class="panel-btn" data-action="collapse" title="Collapse">&ndash;</button>
-        <button class="panel-btn" data-action="hide" title="Hide">&times;</button>
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
       </div>
     </header>
     <div class="panel-body">
@@ -195,8 +232,12 @@
     <header class="panel-head">
       <h2>Hall of shame</h2>
       <div class="panel-actions">
-        <button class="panel-btn" data-action="collapse" title="Collapse">&ndash;</button>
-        <button class="panel-btn" data-action="hide" title="Hide">&times;</button>
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
       </div>
     </header>
     <div class="panel-body">

@@ -236,18 +236,33 @@ turn off, and the arrangement is remembered in the browser's `localStorage`.
 | **System** | camera/backend, fps, Nest, audio route, Gemini text + voice, local TTS, pool |
 | **Hall of shame** | this session's roasts, newest first, with tier and angle |
 
-The top bar carries the state chip (away → good → slouch → warn → roast), the
-session clock, the live rate, the connection indicator, and three buttons:
+The top bar carries the state plate (away → good → slouch → warn → roast), the
+session clock and the live rate, then three icon buttons:
 
 - **Panels** (`P`) — checkboxes to add/hide any panel, a **dim** slider for
   video brightness, and *Reset layout*
 - **Mirror** (`M`) — flips the camera. This is done on the server *before* the
   pose overlay is drawn, so the angle labels stay readable
-- **Full** (`F`) — browser fullscreen (`Esc` leaves the panel menu)
+- **Fullscreen** (`F`) — browser fullscreen (`Esc` leaves the panel menu)
+
+There is deliberately no idle "live" badge; the top bar only shows an `offline`
+plate if the event stream actually drops.
 
 Panels are dragged by their title bar and resized from the bottom-right corner
 (Score). A roast pops up as a caption in the lower third for a few seconds.
 Content is pushed over server-sent events, so nothing here needs a refresh.
+
+### Styling
+
+Flat and instrument-like on purpose: hairline borders, 2 px corners, no blur, no
+shadows, no pill shapes. The chrome (labels, numbers, controls) is set in
+**Overpass Mono** and prose (roast captions, hall of shame) in **Overpass** —
+both self-hosted as woff2 in `web/static/fonts/`, so the page renders correctly
+with no internet. Icons are [Heroicons](https://heroicons.com) (MIT).
+
+The score chart is coloured by value through a single vertical ramp — green at
+the top, amber at the warn/roast thresholds, red at the bottom — with a matching
+gradient fill under the trace, so the colour of the line *is* the reading.
 
 ## HTTP API
 
