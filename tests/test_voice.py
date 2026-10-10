@@ -475,8 +475,8 @@ class TestProviderOrder(unittest.TestCase):
     """auto is ElevenLabs -> local, and nothing else."""
 
     class _Settings:
-        def __init__(self, mode):
-            self._values = {"tts_mode": mode, "nice_mode": False}
+        def __init__(self, mode, nice=False):
+            self._values = {"tts_mode": mode, "nice_mode": nice}
 
         def get(self, key, default=None):
             return self._values.get(key, default)
@@ -535,6 +535,34 @@ class TestProviderOrder(unittest.TestCase):
         path = self._voice_for("gemini")
         self.assertIsNotNone(path)
         self.assertFalse(path.endswith("_gemini.wav"))
+
+    def test_nice_mode_labels_the_clip_and_speaks_in_the_nice_mood(self):
+        service = offline_service(
+            player=self._Player(),
+            eleven=self._Voice(True),
+            local_tts=self._Voice(True),
+            settings=self._Settings("elevenlabs", nice=True),
+            context_provider=lambda: {},
+            pool_size=2,
+        )
+        moods = []
+
+        def capture(text, path, tier=None):
+            moods.append(tier)
+            pathlib.Path(path).write_bytes(b"RIFF....")
+            return True
+
+        service.eleven.synthesize = capture
+        with tempfile.TemporaryDirectory() as tmp:
+            original = config.ROAST_DIR
+            config.ROAST_DIR = pathlib.Path(tmp)
+            try:
+                clip = service._take_pooled("spicy")
+            finally:
+                config.ROAST_DIR = original
+        self.assertEqual(clip.tier, "nice")
+        self.assertEqual(moods, ["nice"])
+        self.assertIn(clip.text, roasts.NICE)
 
 
 class TestElevenLabs(unittest.TestCase):

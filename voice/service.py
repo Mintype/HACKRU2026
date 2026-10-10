@@ -120,8 +120,9 @@ class RoastService:
         if clip is not None:
             return clip
         text = self._fallback_text(tier)
-        path = self._synthesize(text, tier)
-        return Clip(text=text, tier=tier, path=path, source="fallback", voice=self._voice_from_path(path))
+        mood = self._mood_tier(tier)
+        path = self._synthesize(text, mood)
+        return Clip(text=text, tier=mood, path=path, source="fallback", voice=self._voice_from_path(path))
 
     # -- live generation --------------------------------------------------
     def _roast_source(self) -> str:
@@ -178,8 +179,9 @@ class RoastService:
             if pooled is not None:
                 return pooled
         text = self._personalise_text(item["text"])
-        path = self._synthesize(text, tier)
-        return Clip(text=text, tier=tier, path=path, source=source, voice=self._voice_from_path(path))
+        item_tier = str(item.get("tier") or self._mood_tier(tier))
+        path = self._synthesize(text, item_tier)
+        return Clip(text=text, tier=item_tier, path=path, source=source, voice=self._voice_from_path(path))
 
     # -- internals --------------------------------------------------------
     def _deliver(self, clip: Clip, event: Dict) -> Optional[Clip]:
@@ -198,6 +200,10 @@ class RoastService:
 
     def _nice(self) -> bool:
         return bool(self.settings.get("nice_mode")) if self.settings is not None else False
+
+    def _mood_tier(self, tier: str) -> str:
+        """Nice mode speaks in the nice mood, whatever bucket the line came from."""
+        return "nice" if self._nice() else tier
 
     def _exclude_list(self) -> List[str]:
         """Everything we must not say again, most relevant first.
