@@ -84,7 +84,13 @@
 
   <div class="card">
     <h3>Coach attitude</h3>
-    <input type="range" id="level" min="0" max="100" value="20">
+    <input type="range" id="level" min="0" max="100" step="10" value="20" list="level-ticks">
+    <datalist id="level-ticks">
+      <option value="0"></option><option value="10"></option><option value="20"></option>
+      <option value="30"></option><option value="40"></option><option value="50"></option>
+      <option value="60"></option><option value="70"></option><option value="80"></option>
+      <option value="90"></option><option value="100"></option>
+    </datalist>
     <div class="labels"><span>Polite</span><span>Insulting</span></div>
   </div>
 
@@ -185,7 +191,7 @@
     refresh();
   });
 
-  fetch('/api/settings').then(r => r.json()).then(s => $('level').value = s.insult_level);
+  fetch('/api/settings').then(r => r.json()).then(s => $('level').value = Math.round(s.insult_level / 10) * 10);
   $('level').addEventListener('change', () => post('/api/settings', {insult_level: Number($('level').value)}));
 
   $('seed').onclick = async () => { await post('/api/seed'); refresh(); };
