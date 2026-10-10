@@ -126,7 +126,7 @@ python run.py --simulate --no-audio
 │   └── roasts.py             #   hand-written fallback roasts
 ├── web/                      # ROLE 4 — the website judges see
 │   ├── index.html
-│   └── static/{app.js,style.css}
+│   └── static/{app.js,style.css}   # fullscreen feed + draggable glass HUD
 ├── fakes/                    # scripted readings to build against
 ├── tests/                    # unit tests + HTTP smoke test
 ├── deploy/posture-coach.service
@@ -220,6 +220,34 @@ upright posture.
 Other events: `session_start`, `calibrated`, `warn`, `good`, `session_end`.
 
 ---
+
+## The website (HUD)
+
+The page is a **fullscreen feed with a translucent HUD** on top — closer to an
+instrument overlay than a dashboard. Everything on it is a panel you can move or
+turn off, and the arrangement is remembered in the browser's `localStorage`.
+
+| Panel | Shows |
+| ----- | ----- |
+| **Posture** | live neck/torso angles, score with the 0.7/0.8 threshold ticks, cooldown |
+| **Session** | good %, slouches, roasts, longest good streak |
+| **Score** | score over the session with roast markers (resizable) |
+| **Controls** | calibrate, test roast, nice mode, thresholds and audio route |
+| **System** | camera/backend, fps, Nest, audio route, Gemini text + voice, local TTS, pool |
+| **Hall of shame** | this session's roasts, newest first, with tier and angle |
+
+The top bar carries the state chip (away → good → slouch → warn → roast), the
+session clock, the live rate, the connection indicator, and three buttons:
+
+- **Panels** (`P`) — checkboxes to add/hide any panel, a **dim** slider for
+  video brightness, and *Reset layout*
+- **Mirror** (`M`) — flips the camera. This is done on the server *before* the
+  pose overlay is drawn, so the angle labels stay readable
+- **Full** (`F`) — browser fullscreen (`Esc` leaves the panel menu)
+
+Panels are dragged by their title bar and resized from the bottom-right corner
+(Score). A roast pops up as a caption in the lower third for a few seconds.
+Content is pushed over server-sent events, so nothing here needs a refresh.
 
 ## HTTP API
 

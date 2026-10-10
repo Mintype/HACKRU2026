@@ -115,6 +115,10 @@ class VisionService(threading.Thread):
                         self._stop.wait(0.05)
                         continue
                     ts = time.time()
+                    if self._mirror_enabled():
+                        # Flip before pose detection so the overlay is drawn on
+                        # the mirrored frame and its text stays upright.
+                        frame = self._flip(frame)
                     reading = self.detector.process(frame, ts)
 
                 events = self.state_machine.update(reading)
@@ -154,9 +158,25 @@ class VisionService(threading.Thread):
         try:
             from vision import synthetic
 
-            return synthetic.render(reading)
+            return synthetic.render(reading, mirror=self._mirror_enabled())
         except Exception:
             return None
+
+    def _mirror_enabled(self) -> bool:
+        if self.settings is None:
+            return False
+        try:
+            return bool(self.settings.get("mirror"))
+        except Exception:
+            return False
+
+    def _flip(self, frame):
+        try:
+            import cv2
+
+            return cv2.flip(frame, 1)
+        except Exception:
+            return frame
 
     def _overlay(self, frame, reading: Dict) -> None:
         if self.detector is None:

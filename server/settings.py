@@ -28,6 +28,7 @@ DEFAULTS: Dict[str, Any] = {
     "model": "lite",
     # voice / website
     "nice_mode": False,
+    "mirror": False,
     "audio_route": "bluetooth",  # bluetooth | cast | off
     "roast_pool_size": 9,
     "cast_name": "",

@@ -38,7 +38,7 @@ def _polar(origin: Tuple[float, float], angle_deg: float, length: float, dy_sign
     return (x, y)
 
 
-def render(reading: Dict[str, object], width: int = WIDTH, height: int = HEIGHT):
+def render(reading: Dict[str, object], width: int = WIDTH, height: int = HEIGHT, mirror: bool = False):
     if not available():
         return None
 
@@ -87,7 +87,9 @@ def render(reading: Dict[str, object], width: int = WIDTH, height: int = HEIGHT)
         ankle = (knee[0], knee[1] + SHIN_LEN)
 
     def ipt(p):
-        return int(p[0]), int(p[1])
+        # Mirror only the figure, never the text, so labels stay readable.
+        x = (width - p[0]) if mirror else p[0]
+        return int(x), int(p[1])
 
     cv2.line(frame, ipt(ear), ipt(shoulder), color, 4, cv2.LINE_AA)
     cv2.line(frame, ipt(shoulder), ipt(hip), color, 4, cv2.LINE_AA)
