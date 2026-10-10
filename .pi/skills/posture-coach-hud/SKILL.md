@@ -43,6 +43,12 @@ the corners so the middle of the frame — where the person is — stays clear.
 - Flat and instrument-like: hairline borders, 2 px corners, frosted
   `backdrop-filter` surfaces, no pill shapes, no drop shadows. Icons are inline
   [Heroicons](https://heroicons.com) — inline them, do not add an icon font.
+- **Colour coding is deliberately blunt: green = good, red = bad.** `slouching`
+  and `roasted` are the same red — only the pill text tells them apart — and amber
+  means "undecided", i.e. the score sits in the narrow band between the two
+  thresholds so the state has not changed. The chart ramp follows the same rule
+  (green above the good threshold, red below the slouch threshold). Keep any new
+  indicator consistent with this; do not reintroduce a third "warning" colour.
 - **Header text centring:** dividers must be drawn as an inset hairline
   (`box-shadow: inset 0 -1px 0 …`), never a real `border-bottom`. A real border sits
   inside the fixed height under `box-sizing: border-box`, so flex centring lands

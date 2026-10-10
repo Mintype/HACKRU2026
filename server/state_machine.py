@@ -40,7 +40,7 @@ class StateMachineConfig:
     """Live-tunable thresholds (the website edits these)."""
 
     roast_seconds: float = 10.0
-    cooldown_seconds: float = 90.0
+    cooldown_seconds: float = 10.0
     good_debounce_seconds: float = 2.0
     calibration_seconds: float = 5.0
     lower_threshold: float = 0.7
@@ -195,9 +195,9 @@ class PostureStateMachine:
             return empty
 
         elapsed = now - self.slouch_since
-        waits: List[tuple] = []
-        if not self.roasted:
-            waits.append(("sustained_slouch", max(0.0, self.config.roast_seconds - elapsed)))
+        waits: List[tuple] = [
+            ("sustained_slouch", max(0.0, self.config.roast_seconds - elapsed))
+        ]
         if self.config.bad_score_threshold > 0 and self.bad_since is not None:
             waits.append(
                 ("bad_posture", max(0.0, self.config.bad_score_seconds - (now - self.bad_since)))
@@ -279,9 +279,12 @@ class PostureStateMachine:
         else:
             self.bad_since = None
 
-        # Cooldown blocks roasts, not tracking: the state still updates.
+        # While the episode continues, a roast repeats every cooldown_seconds.
+        # A previous roast in the same episode must not stop the next one: the
+        # cooldown is what rate-limits it, so staying in the amber/red states
+        # keeps getting you roasted instead of silently going quiet.
         fired = False
-        if elapsed >= self.config.roast_seconds and not self.roasted and ts >= self.cooldown_until:
+        if elapsed >= self.config.roast_seconds and ts >= self.cooldown_until:
             events.extend(self._fire_roast(ts, elapsed, score, "sustained_slouch"))
             fired = True
         if (

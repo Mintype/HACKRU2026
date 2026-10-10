@@ -118,7 +118,7 @@ html, body {
 .state-away        { color: var(--away); }
 .state-calibrating { color: var(--cal); }
 .state-good        { color: var(--good); }
-.state-slouching   { color: var(--warn); }
+.state-slouching   { color: var(--bad); }
 .state-roasted     { color: var(--bad); }
 .offline           { color: var(--warn); }
 

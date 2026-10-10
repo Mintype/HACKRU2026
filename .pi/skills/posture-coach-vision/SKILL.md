@@ -34,9 +34,15 @@ them. Image `y` grows **downward**, so "up" offsets are `y_below - y_above`.
 
 Two triggers, either can fire, both gated by the same `cooldown_seconds`:
 
-1. **sustained slouch** — score below the lower threshold for `roast_seconds` (~30 s)
+1. **sustained slouch** — score below the lower threshold for `roast_seconds` (~10 s),
+   repeating every `cooldown_seconds` (~10 s) for as long as the slouch continues
 2. **bad posture** — score below `bad_score_threshold` (~0.45) held for
    `bad_score_seconds` (~3 s), firing without waiting out the timer
+
+Both stay armed for the whole episode: staying in the amber (`slouching`) or red
+(`roasted`) states keeps earning roasts, spaced by the cooldown. A red state is
+still slouching — it must not go quiet, and `time_to_roast()` reports the cooldown
+as the countdown rather than "not slouching".
 
 `away` (no person, or not seated) is **never** roasted. There is no warning
 stage — slouching turns the website amber, and the roast lands at

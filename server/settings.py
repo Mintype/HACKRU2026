@@ -33,7 +33,7 @@ DEFAULTS: Dict[str, Any] = {
     "tts_mode": "auto",  # auto | elevenlabs | local  (force one for a consistent voice)
     "audio_route": "bluetooth",  # bluetooth | cast | off
     "roast_source": "live",  # live | pool  (live asks Gemini at the moment of the slouch)
-    "live_api_cooldown_seconds": 30.0,
+    "live_api_cooldown_seconds": 10.0,
     # Clips are pre-generated with Gemini TTS, whose free tier allows only ~10
     # requests/day, so the default pool is small enough to fit a daily quota.
     # Raise this (and the quota) for more variety.
@@ -63,12 +63,13 @@ MODELS = ("lite", "full", "heavy")
 
 #: Bump this whenever a default changes, so an existing settings.json cannot keep
 #: overriding the new value for ever.
-SETTINGS_VERSION = 2
+SETTINGS_VERSION = 3
 
 #: version -> the values to force onto files older than it. Everything the user
 #: tuned by hand (camera index, mirror, voice) is preserved.
 MIGRATIONS: Dict[int, Dict[str, Any]] = {
     1: {"roast_seconds": 10.0, "cooldown_seconds": 10.0},
+    2: {"live_api_cooldown_seconds": 10.0},
 }
 
 

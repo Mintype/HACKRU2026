@@ -226,7 +226,7 @@ cooldown:
 
 | Trigger | Condition | Default |
 | ------- | --------- | ------- |
-| **sustained slouch** | score below `lower_threshold` for `roast_seconds` | 0.70 for 30 s |
+| **sustained slouch** | score below `lower_threshold` for `roast_seconds` | 0.70 for 10 s |
 | **bad posture** | score below `bad_score_threshold` held for `bad_score_seconds` | 0.45 for 3 s |
 
 ```
@@ -327,7 +327,7 @@ rather than website settings.
 | ------- | ------- | ------ | ------- |
 | `tts_mode` | `auto` | `auto`, `elevenlabs`, `local` | Which engine speaks. `auto` = ElevenLabs when a key is present, otherwise the local engine. Forcing one keeps the voice consistent and goes **silent** rather than mixing engines. |
 | `roast_source` | `live` | `live`, `pool` | Generate a fresh roast at the moment of the slouch, or play pre-generated clips instantly. |
-| `live_api_cooldown_seconds` | `30` | 0–3600 | Minimum gap between two live API calls, on top of `cooldown_seconds`. Protects the quota if you shorten the roast cooldown. |
+| `live_api_cooldown_seconds` | `10` | 0–3600 | Minimum gap between two *freshly generated* roasts, on top of `cooldown_seconds`. Within it, a roast still plays from the pre-generated pool. It defaults to the same 10 s so live generation keeps up with the roast cadence, and it is the dial to raise if you want to protect the API quota. |
 | `roast_pool_size` | `3` | 1–50 | Clips kept ready **per tier** (so 3 × 3 tiers = 9). Only used when `roast_source = pool`. |
 | `nice_mode` | `false` | on/off | Swaps insults for encouragement and uses `prompts/nice.txt`. |
 
@@ -477,12 +477,26 @@ it as translucent panels. Data arrives over SSE, so nothing needs refreshing.
 
 | Panel | Shows |
 | ----- | ----- |
-| **Posture** | live neck and torso angles, the score with its 0.7/0.8 threshold ticks, and the **roast countdown** — `roast in 6.4s · sustained_slouch`, or `held by cooldown` when a cooldown is delaying it. |
-| **Session** | good-posture %, slouches, roasts, longest good streak. |
+| **Posture** | live neck and torso angles, the score with its 0.7/0.8 threshold ticks, and the **roast countdown** — `roast in 6.4s · sustained_slouch`, or `held by cooldown` when a cooldown is delaying it. || **Session** | good-posture %, slouches, roasts, longest good streak. |
 | **Score** | the score over the session, with roast markers (resizable). |
 | **Controls** | calibrate, test roast, nice mode, and every setting in the tables above. |
 | **System** | the debugging surface: **Detection** (`person · seated` — the usual reason nothing fires), camera and backend, fps, Nest connection, audio route, the voice engine and its voice, the pool's voice mix, insults used, and the roast source with any API cooldown. |
 | **Debug** | the raw internals, live: state, detection, score (smoothed and raw), neck and torso with their drift, which part is failing, the slouch timer, **the roast countdown with its trigger or what is blocking it**, cooldown, calibration progress, the thresholds and timers in use, camera stats, session id and the last state-machine event. Hide it from **Panels** when you do not want it. |
+
+### Colour coding
+
+Deliberately blunt, so a glance is enough:
+
+| Colour | Means |
+| ------ | ----- |
+| **green** | good posture — score above the upper threshold |
+| **red** | bad posture — `slouching` *and* `roasted` are the same badness, only the pill text distinguishes them |
+| amber | undecided: the score is in the narrow band between the two thresholds, so the state has not changed yet |
+| grey | `away` — nobody seated, so nothing is judged |
+| blue | `calibrating` |
+
+The score chart uses the same idea: green above the good threshold, red below the
+slouch threshold, crossing over only inside that band.
 
 Panels can be dragged by their title bar, collapsed, hidden and re-added from the
 **Panels** menu; the layout is remembered in the browser. The header buttons are

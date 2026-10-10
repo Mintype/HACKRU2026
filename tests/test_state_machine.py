@@ -134,11 +134,18 @@ class TestStateMachine(unittest.TestCase):
         self.assertEqual(len(later), 1)
         self.assertGreaterEqual(later[0]["ts"], first_roast_ts + self.cfg.cooldown_seconds)
 
-    def test_only_one_roast_per_slouch_episode(self):
+    def test_a_slouch_gets_a_roast_every_cooldown(self):
+        # Staying in the amber/red states keeps earning roasts; the cooldown is
+        # the only thing that spaces them out.
+        self.machine.config.cooldown_seconds = 20.0
         start = with_session(self.machine)
-        events = feed(self.machine, start, 200, 0.5)
+        events = feed(self.machine, start, 200, 0.55)
         due = [e for e in events if e["event"] == "roast_due"]
-        self.assertEqual(len(due), 1)
+        self.assertGreaterEqual(len(due), 5)
+        gaps = [round(due[i + 1]["ts"] - due[i]["ts"], 1) for i in range(len(due) - 1)]
+        self.assertTrue(all(gap >= 20.0 for gap in gaps), gaps)
+        # and it is still one slouch episode, not one per roast
+        self.assertEqual(self.machine.slouch_count, 1)
 
     def test_hysteresis_band_does_not_flip_state(self):
         start = with_session(self.machine)
@@ -233,6 +240,19 @@ class TestStateMachine(unittest.TestCase):
         self.assertAlmostEqual(info["seconds"], 7.0, delta=0.6)
         self.assertFalse(info["ready"])
         self.assertIsNone(info["blocked_by"])
+
+    def test_the_countdown_survives_a_roast(self):
+        # Red must still count as slouching: after a roast the countdown is the
+        # cooldown, not "not slouching".
+        self.machine.config.cooldown_seconds = 30.0
+        start = with_session(self.machine)
+        feed(self.machine, start, 11, 0.55)
+        self.assertEqual(self.machine.state, ROASTED)
+        info = self.machine.time_to_roast(start + 10)
+        self.assertIsNotNone(info["seconds"])
+        self.assertEqual(info["trigger"], "sustained_slouch")
+        self.assertEqual(info["blocked_by"], "cooldown")
+        self.assertGreater(info["seconds"], 25.0)
 
     def test_time_to_roast_prefers_the_faster_trigger(self):
         self.machine.config.roast_seconds = 600.0

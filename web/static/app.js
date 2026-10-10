@@ -32,11 +32,13 @@
     slouching: "state-slouching",
     roasted: "state-roasted",
   };
+  // Red means bad posture, whether or not a roast has landed yet: slouching and
+  // roasted are the same badness, only the pill text distinguishes them.
   const STATE_COLOR = {
     away: "#8b93a1",
     calibrating: "#86a9d4",
     good: "#82c08e",
-    slouching: "#d8b25c",
+    slouching: "#d98080",
     roasted: "#d98080",
   };
 
@@ -486,11 +488,12 @@
 
     // The trace is coloured by score through one vertical ramp: green up top,
     // amber at the warn/roast thresholds, red down low. The colour is the data.
+    // Red means bad posture, green means good. The ramp only crosses over in the
+    // narrow band between the two thresholds, so amber means "undecided".
     const ramp = ctx.createLinearGradient(0, pad.t, 0, pad.t + plotH);
     ramp.addColorStop(0.0, "#7fc48d");
-    ramp.addColorStop(0.19, "#7fc48d");
-    ramp.addColorStop(0.3, "#d8b25c");
-    ramp.addColorStop(0.5, "#cf9468");
+    ramp.addColorStop(0.2, "#7fc48d");
+    ramp.addColorStop(0.3, "#d98080");
     ramp.addColorStop(1.0, "#d98080");
 
     const trace = new Path2D();
