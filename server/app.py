@@ -43,6 +43,7 @@ class Coach:
         host: str = "0.0.0.0",
         port: int = 5000,
         settings_path: Optional[str] = None,
+        settings_overrides: Optional[Dict[str, object]] = None,
         fake_readings=None,
     ):
         config.ensure_dirs()
@@ -51,7 +52,7 @@ class Coach:
         self.no_audio = no_audio
         self.requested_simulate = bool(simulate)
 
-        self.settings = Settings(path=settings_path)
+        self.settings = Settings(path=settings_path, overrides=settings_overrides)
         if model:
             self.settings.update({"model": model})
 
@@ -207,6 +208,7 @@ def create_app(
     host: str = "0.0.0.0",
     port: int = 5000,
     settings_path: Optional[str] = None,
+    settings_overrides: Optional[Dict[str, object]] = None,
     fake_readings=None,
 ) -> Flask:
     config.ensure_dirs()
@@ -228,6 +230,7 @@ def create_app(
         host=host,
         port=port,
         settings_path=settings_path,
+        settings_overrides=settings_overrides,
         fake_readings=fake_readings,
     )
     app.coach = coach  # type: ignore[attr-defined]

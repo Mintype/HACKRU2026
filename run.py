@@ -102,6 +102,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         help="synthesize one line with the configured TTS, play it and exit")
     parser.add_argument("--preview", action="store_true",
                         help="open a standalone preview window instead of the website")
+    parser.add_argument("--demo", action="store_true",
+                        help="short thresholds (warn 5s, roast 10s, cooldown 15s) so the whole cycle is visible fast")
     parser.add_argument("--video", type=str, default=None, help="use a video file instead of the webcam")
     parser.add_argument("--model", type=str, default=None, choices=["lite", "full", "heavy"],
                         help="MediaPipe pose model (default lite on the Pi)")
@@ -258,8 +260,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         host=args.host,
         port=args.port,
         settings_path=args.settings,
+        settings_overrides=(
+            {
+                "warn_seconds": 5,
+                "roast_seconds": 10,
+                "cooldown_seconds": 15,
+                "calibration_seconds": 3,
+                "roast_pool_size": 2,
+            }
+            if args.demo
+            else None
+        ),
     )
     coach = app.coach
+    if args.demo:
+        print("  demo   : warn 5s / roast 10s / cooldown 15s (not saved unless you press Save)")
 
     if coach.simulate:
         mode = "SIMULATED feed"

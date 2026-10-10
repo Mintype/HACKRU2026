@@ -554,6 +554,15 @@
       $("sys-fps").textContent = text;
     }
     if (reading.state) applyState(reading.state);
+
+    // Why a roast may never fire: nobody detected, or detected but not seated.
+    if (reading.person !== undefined) {
+      const cell = $("sys-detect");
+      const person = reading.person === true;
+      const seated = reading.seated === true;
+      cell.textContent = person ? (seated ? "person \u00b7 seated" : "person \u00b7 not seated") : "nobody";
+      cell.className = person && seated ? "ok" : person ? "warn" : "none";
+    }
     if (reading.score != null) {
       series.push({ ts: reading.ts, score: reading.score, state: reading.state });
       if (series.length > 4000) series.shift();
