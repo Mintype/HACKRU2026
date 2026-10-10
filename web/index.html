@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Posture Coach</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪑</text></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🪑</span>
+      <div>
+        <h1>Posture Coach</h1>
+        <p>side-view posture detection &rarr; Gemini roasts &rarr; Nest</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div id="conn" class="conn offline" title="server-sent events connection">
+        <span class="conn-dot"></span><span id="conn-label">connecting&hellip;</span>
+      </div>
+      <div id="state-pill" class="state-pill state-away">away</div>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- Live feed ------------------------------------------------------- -->
+    <section class="card feed-card">
+      <div class="card-head">
+        <h2>Live feed</h2>
+        <span class="muted" id="feed-meta">&mdash; fps</span>
+      </div>
+      <div class="feed-wrap">
+        <img id="feed" src="/video_feed" alt="Live annotated camera feed" />
+        <div id="calib-overlay" class="calib-overlay hidden">
+          <div class="calib-inner">
+            <strong>Sit up straight</strong>
+            <span>calibrating&hellip;</span>
+            <div class="calib-bar"><i id="calib-bar"></i></div>
+          </div>
+        </div>
+      </div>
+      <div class="roast-caption">
+        <span class="caption-label">Last roast</span>
+        <p id="roast-caption">Waiting for the first slouch&hellip;</p>
+      </div>
+    </section>
+
+    <!-- Status + stats -------------------------------------------------- -->
+    <div class="side">
+      <section class="card status-card">
+        <div class="card-head"><h2>Posture</h2><span class="muted" id="session-clock">session 0:00</span></div>
+        <div class="angle-row">
+          <div class="angle">
+            <label>Neck</label>
+            <span id="neck-value" class="angle-value">&mdash;</span>
+            <span class="angle-unit">deg from vertical</span>
+          </div>
+          <div class="angle">
+            <label>Torso</label>
+            <span id="torso-value" class="angle-value">&mdash;</span>
+            <span class="angle-unit">deg from vertical</span>
+          </div>
+        </div>
+        <div class="score-block">
+          <div class="score-head"><label>Posture score</label><span id="score-value">&mdash;</span></div>
+          <div class="score-bar"><i id="score-bar"></i><span class="thresh lo" title="slouch threshold"></span><span class="thresh hi" title="good threshold"></span></div>
+        </div>
+        <div id="cooldown-row" class="cooldown hidden">cooldown <span id="cooldown">0</span>s</div>
+      </section>
+
+      <section class="card stats-card">
+        <div class="card-head"><h2>Session stats</h2></div>
+        <div class="stats-grid">
+          <div class="stat"><span class="stat-value" id="stat-good">&mdash;</span><span class="stat-label">good posture</span></div>
+          <div class="stat"><span class="stat-value" id="stat-slouches">&mdash;</span><span class="stat-label">slouches</span></div>
+          <div class="stat"><span class="stat-value" id="stat-roasts">&mdash;</span><span class="stat-label">roasts</span></div>
+          <div class="stat"><span class="stat-value" id="stat-streak">&mdash;</span><span class="stat-label">longest streak</span></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Chart ----------------------------------------------------------- -->
+    <section class="card chart-card">
+      <div class="card-head">
+        <h2>Score over the session</h2>
+        <span class="muted">red markers = roasts</span>
+      </div>
+      <canvas id="chart" height="200"></canvas>
+    </section>
+
+    <!-- Controls -------------------------------------------------------- -->
+    <section class="card controls-card">
+      <div class="card-head"><h2>Controls</h2></div>
+      <div class="button-row">
+        <button id="btn-calibrate" class="btn primary">Calibrate</button>
+        <button id="btn-roast" class="btn danger">Test roast</button>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="nice-mode" />
+        <span>Nice mode (encouragement instead of roasts)</span>
+      </label>
+      <form id="settings-form" class="settings-form">
+        <div class="field"><label for="warn_seconds">Warn after (s)</label><input type="number" id="warn_seconds" name="warn_seconds" min="1" step="1" /></div>
+        <div class="field"><label for="roast_seconds">Roast after (s)</label><input type="number" id="roast_seconds" name="roast_seconds" min="2" step="1" /></div>
+        <div class="field"><label for="cooldown_seconds">Cooldown (s)</label><input type="number" id="cooldown_seconds" name="cooldown_seconds" min="0" step="5" /></div>
+        <div class="field"><label for="delta_angle">Tolerance (deg)</label><input type="number" id="delta_angle" name="delta_angle" min="1" step="1" /></div>
+        <div class="field"><label for="audio_route">Audio route</label>
+          <select id="audio_route" name="audio_route">
+            <option value="bluetooth">Bluetooth (Nest)</option>
+            <option value="cast">Wi-Fi cast (backup)</option>
+            <option value="off">Off (print only)</option>
+          </select>
+        </div>
+        <button type="submit" class="btn">Save settings</button>
+      </form>
+      <p id="settings-status" class="muted small"></p>
+    </section>
+
+    <!-- System status --------------------------------------------------- -->
+    <section class="card sys-card">
+      <div class="card-head"><h2>System status</h2></div>
+      <ul class="sys-list">
+        <li><span>Camera mode</span><b id="sys-mode">&mdash;</b></li>
+        <li><span>Frame rate</span><b id="sys-fps">&mdash;</b></li>
+        <li><span>Nest (Bluetooth)</span><b id="sys-bt">&mdash;</b></li>
+        <li><span>Audio route</span><b id="sys-route">&mdash;</b></li>
+        <li><span>Gemini text</span><b id="sys-gemini">&mdash;</b></li>
+        <li><span>Gemini TTS</span><b id="sys-tts">&mdash;</b></li>
+        <li><span>Local TTS fallback</span><b id="sys-local">&mdash;</b></li>
+        <li><span>Roast pool ready</span><b id="sys-pool">&mdash;</b></li>
+      </ul>
+    </section>
+
+    <!-- Hall of shame --------------------------------------------------- -->
+    <section class="card shame-card">
+      <div class="card-head"><h2>Hall of shame</h2><span class="muted">this session</span></div>
+      <ol id="shame-list" class="shame-list"><li class="muted">No roasts yet. Sit up straight and nobody gets hurt.</li></ol>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Runs entirely on the Pi &middot; the browser only watches</span>
+    <span id="footer-url"></span>
+  </footer>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

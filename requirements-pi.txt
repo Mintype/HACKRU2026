@@ -1,0 +1,12 @@
+# Raspberry Pi 5 install.
+#
+# System packages (install with apt BEFORE pip):
+#   sudo apt install -y python3-venv python3-dev libcamera-apps \
+#        bluez pulseaudio-utils pipewire-audio espeak-ng
+#
+# Then, inside the venv:
+#   pip install -r requirements-pi.txt
+#
+# If MediaPipe refuses to build from source, use piwheels:
+#   pip install --extra-index-url https://www.piwheels.org/simple mediapipe
+-r requirements-vision.txt

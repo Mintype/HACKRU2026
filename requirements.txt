@@ -1,0 +1,9 @@
+# Core runtime.  Works on a laptop (simulation mode) and on the Pi.
+# opencv-contrib-python is used rather than opencv-python because MediaPipe
+# depends on the contrib build; installing both shadows the same `cv2` package.
+Flask>=3.0
+numpy>=1.26
+opencv-contrib-python>=4.9
+python-dotenv>=1.0
+google-genai>=1.0
+pychromecast>=14.0

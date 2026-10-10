@@ -1,0 +1,29 @@
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# --- Secrets / local config ----------------------------------------------
+.env
+
+# --- Runtime data ---------------------------------------------------------
+data/
+models/*.task
+
+# --- OS / editor ----------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- Scratch --------------------------------------------------------------
+guide.txt
+*.log
+
+# smoke test scratch
+.smoke-data/
