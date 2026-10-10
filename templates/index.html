@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Posture Coach</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root { --good:#2e9e5b; --ok:#e0a526; --bad:#d9473f; --bg:#f6f7f9; --card:#fff; --text:#1c2128; --muted:#6b7480; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#14171c; --card:#1d2128; --text:#e8ebef; --muted:#8c96a3; }
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; }
+    main { max-width:900px; margin:0 auto; padding:1.5rem 1rem 3rem; }
+    h1 { margin:0 0 1rem; font-size:1.6rem; }
+    .card { background:var(--card); border-radius:12px; padding:1.1rem; margin-bottom:1rem; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+    .card h3 { margin:0 0 .6rem; font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+    .hero { display:flex; align-items:center; gap:1.5rem; flex-wrap:wrap; }
+    .big { font-size:4rem; font-weight:700; line-height:1; }
+    .hero small { color:var(--muted); display:block; margin-top:.3rem; }
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:1rem; margin-bottom:1rem; }
+    .stats .card { margin:0; text-align:center; }
+    .stats .num { font-size:1.8rem; font-weight:700; }
+    .tabs { display:flex; gap:.4rem; margin-bottom:.8rem; flex-wrap:wrap; }
+    button { font:inherit; border:1px solid var(--muted); background:transparent; color:var(--text); border-radius:999px; padding:.25rem .8rem; cursor:pointer; }
+    button.active { background:var(--text); color:var(--bg); border-color:var(--text); }
+    input[type=range] { width:100%; }
+    select { font:inherit; border:1px solid var(--muted); background:var(--card); color:var(--text); border-radius:8px; padding:.25rem .5rem; }
+    .cam-bar { display:flex; align-items:center; gap:.5rem; margin-bottom:.6rem; }
+    .cam-bar label { font-size:.85rem; color:var(--muted); }
+    #feed { width:100%; display:block; border-radius:8px; background:#000; aspect-ratio:4/3; object-fit:contain; }
+    .labels { display:flex; justify-content:space-between; font-size:.85rem; color:var(--muted); }
+    pre { white-space:pre-wrap; font-family:inherit; margin:0; }
+    .footer { display:flex; gap:.5rem; justify-content:center; margin-top:1.5rem; }
+    .footer button { font-size:.8rem; opacity:.7; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>🧍 Posture Coach</h1>
+
+  <div class="card hero">
+    <div>
+      <h3>Right now</h3>
+      <div class="big" id="current">--</div>
+    </div>
+    <div id="verdict" style="font-size:1.2rem"></div>
+    <div id="cam" style="margin-left:auto; font-size:.9rem; color:var(--muted)">📷 ...</div>
+  </div>
+
+  <div class="card">
+    <h3>Camera</h3>
+    <div class="cam-bar">
+      <label for="camSelect">Source</label>
+      <select id="camSelect"></select>
+    </div>
+    <img id="feed" src="/video_feed" alt="Live camera feed">
+  </div>
+
+  <div class="stats">
+    <div class="card"><h3>Average</h3><div class="num" id="avg">--</div></div>
+    <div class="card"><h3>Best</h3><div class="num" id="best">--</div></div>
+    <div class="card"><h3>Worst</h3><div class="num" id="worst">--</div></div>
+    <div class="card"><h3>Time sitting well</h3><div class="num" id="good">--</div></div>
+    <div class="card"><h3>Trend</h3><div class="num" id="trend">--</div></div>
+  </div>
+
+  <div class="card">
+    <h3>Posture score (0-100)</h3>
+    <div class="tabs" id="tabs">
+      <button data-s="3600">1h</button>
+      <button data-s="86400" class="active">24h</button>
+      <button data-s="604800">7d</button>
+      <button data-s="0">All</button>
+    </div>
+    <canvas id="chart" height="110"></canvas>
+  </div>
+
+  <div class="card">
+    <h3>Latest AI report</h3>
+    <pre id="report">No reports yet.</pre>
+  </div>
+
+  <div class="card">
+    <h3>Coach attitude</h3>
+    <input type="range" id="level" min="0" max="100" value="20">
+    <div class="labels"><span>Polite</span><span>Insulting</span></div>
+  </div>
+
+  <div class="footer">
+    <button id="seed">Load demo data</button>
+    <button id="clear">Clear data</button>
+  </div>
+</main>
+
+<script>
+  const GOOD = 70;
+  let range = 86400;
+  const $ = id => document.getElementById(id);
+  const colorFor = v => v >= GOOD ? 'var(--good)' : v >= 40 ? 'var(--ok)' : 'var(--bad)';
+  const post = (url, body) => fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})});
+
+  const chart = new Chart($('chart'), {
+    type: 'line',
+    data: { labels: [], datasets: [
+      { label:'Posture', data:[], borderColor:'#3b82f6', backgroundColor:'rgba(59,130,246,.15)', fill:true, tension:.3, pointRadius:0 },
+      { label:'Good posture line', data:[], borderColor:'#2e9e5b', borderDash:[6,6], pointRadius:0, borderWidth:1 }
+    ]},
+    options: { scales:{ y:{ min:0, max:100 } }, plugins:{ legend:{ display:false } }, animation:false }
+  });
+
+  function fmtLabel(ts) {
+    const d = new Date(ts*1000);
+    return range && range <= 86400 ? d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+                                    : d.toLocaleDateString([], {month:'short', day:'numeric'}) + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
+
+  async function refreshCamera() {
+    try {
+      const c = await (await fetch('/api/camera/status')).json();
+      $('cam').textContent = !c.camera_open ? '📷 camera offline'
+        : c.person_detected ? '📷 person detected' : '📷 no one in view';
+      $('cam').style.color = !c.camera_open ? 'var(--bad)' : c.person_detected ? 'var(--good)' : 'var(--muted)';
+    } catch (e) { $('cam').textContent = '📷 server unreachable'; }
+  }
+
+  async function loadCameras() {
+    try {
+      const c = await (await fetch('/api/cameras')).json();
+      $('camSelect').innerHTML = c.available
+        .map(i => `<option value="${i}"${i === c.current ? ' selected' : ''}>Camera ${i}</option>`)
+        .join('');
+    } catch (e) { /* leave the picker empty if the server is down */ }
+  }
+
+  $('camSelect').addEventListener('change', async () => {
+    await post('/api/cameras', {index: Number($('camSelect').value)});
+    $('feed').src = '/video_feed?t=' + Date.now();  // reconnect to the new stream
+  });
+
+  $('feed').addEventListener('error', () => {
+    setTimeout(() => { $('feed').src = '/video_feed?t=' + Date.now(); }, 2000);
+  });
+
+  async function refresh() {
+    const readings = await (await fetch('/api/readings?since=' + range)).json();
+    chart.data.labels = readings.map(r => fmtLabel(r.ts));
+    chart.data.datasets[0].data = readings.map(r => r.score);
+    chart.data.datasets[1].data = readings.map(() => GOOD);
+    chart.update();
+
+    if (readings.length) {
+      const scores = readings.map(r => r.score);
+      const last = scores[scores.length-1];
+      const avg = scores.reduce((a,b)=>a+b,0)/scores.length;
+      $('current').textContent = Math.round(last);
+      $('current').style.color = colorFor(last);
+      $('verdict').textContent = last >= GOOD ? 'Looking good 👍' : last >= 40 ? 'Slouching a bit...' : 'Sit up!';
+      $('avg').textContent = Math.round(avg);
+      $('best').textContent = Math.round(Math.max(...scores));
+      $('worst').textContent = Math.round(Math.min(...scores));
+      $('good').textContent = Math.round(100*scores.filter(s=>s>=GOOD).length/scores.length) + '%';
+      const half = Math.floor(scores.length/2);
+      if (half > 0) {
+        const a = scores.slice(0,half).reduce((x,y)=>x+y,0)/half;
+        const b = scores.slice(half).reduce((x,y)=>x+y,0)/(scores.length-half);
+        const diff = Math.round(b-a);
+        $('trend').textContent = (diff>0?'▲ +':diff<0?'▼ ':'– ') + diff;
+        $('trend').style.color = diff>0 ? 'var(--good)' : diff<0 ? 'var(--bad)' : '';
+      }
+    } else {
+      ['current','avg','best','worst','good','trend'].forEach(id => $(id).textContent = '--');
+      $('verdict').textContent = 'No data yet';
+    }
+
+    const reports = await (await fetch('/api/reports')).json();
+    if (reports.length) $('report').textContent = reports[0].body;
+  }
+
+  $('tabs').addEventListener('click', e => {
+    if (!e.target.dataset.s) return;
+    range = Number(e.target.dataset.s);
+    document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b === e.target));
+    refresh();
+  });
+
+  fetch('/api/settings').then(r => r.json()).then(s => $('level').value = s.insult_level);
+  $('level').addEventListener('change', () => post('/api/settings', {insult_level: Number($('level').value)}));
+
+  $('seed').onclick = async () => { await post('/api/seed'); refresh(); };
+  $('clear').onclick = async () => { if (confirm('Delete all readings?')) { await fetch('/api/readings', {method:'DELETE'}); refresh(); } };
+
+  refresh();
+  refreshCamera();
+  loadCameras();
+  setInterval(refresh, 5000);
+  setInterval(refreshCamera, 1000);
+</script>
+</body>
+</html>
