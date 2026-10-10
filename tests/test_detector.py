@@ -99,6 +99,23 @@ class TestPostureDetector(unittest.TestCase):
         self.assertTrue(reading["seated"])
         self.assertIsNone(reading["thigh_angle"])
 
+    def test_reports_which_part_is_giving_way(self):
+        # head juts 50px forward, torso stays upright
+        detector = self.make(slouching())
+        detector.set_baseline(12.0, 4.0)
+        reading = detector.process(frame=None, ts=0.0)
+        self.assertEqual(reading["slouch_part"], "neck")
+        self.assertGreater(reading["neck_drift"], reading["torso_drift"])
+
+    def test_torso_dominant_slouch(self):
+        landmarks = upright()
+        landmarks["shoulder"] = (150.0, 200.0, 1.0)  # shoulder forward of the hip
+        detector = self.make(landmarks)
+        detector.set_baseline(12.0, 4.0)
+        reading = detector.process(frame=None, ts=0.0)
+        self.assertEqual(reading["slouch_part"], "torso")
+        self.assertGreater(reading["torso_drift"], reading["neck_drift"])
+
     @unittest.skipUnless(HAVE_NUMPY and HAVE_CV2, "numpy + opencv required")
     def test_overlay_draws_without_error(self):
         import numpy as np

@@ -70,6 +70,9 @@ def scripted_readings(
                         "raw_score": None,
                         "calibrated": True,
                         "thigh_angle": None,
+                        "neck_drift": None,
+                        "torso_drift": None,
+                        "slouch_part": None,
                         "sim": True,
                         "phase": phase,
                     }
@@ -85,8 +88,16 @@ def scripted_readings(
                     neck = BASELINE_NECK + drift * 30.0 + rng.uniform(-1.2, 1.2)
                     torso = BASELINE_TORSO + drift * 14.0 + rng.uniform(-0.8, 0.8)
                     # Score from the larger of the two drifts, against 20 deg.
-                    worst = max(neck - BASELINE_NECK, torso - BASELINE_TORSO)
+                    neck_drift = neck - BASELINE_NECK
+                    torso_drift = torso - BASELINE_TORSO
+                    worst = max(neck_drift, torso_drift)
                     score = max(0.0, min(1.0, 1.0 - worst / 20.0))
+                    if neck_drift > torso_drift + 3.0:
+                        part = "neck"
+                    elif torso_drift > neck_drift + 3.0:
+                        part = "torso"
+                    else:
+                        part = "even"
                     reading = {
                         "ts": ts,
                         "person": True,
@@ -97,6 +108,9 @@ def scripted_readings(
                         "raw_score": round(score, 3),
                         "calibrated": True,
                         "thigh_angle": 6.0 + rng.uniform(-2.0, 2.0),
+                        "neck_drift": round(max(0.0, neck_drift), 2),
+                        "torso_drift": round(max(0.0, torso_drift), 2),
+                        "slouch_part": part,
                         "sim": True,
                         "phase": phase,
                     }

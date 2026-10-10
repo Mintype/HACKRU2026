@@ -130,12 +130,28 @@ class PostureDetector:
                 "raw_score": None,
                 "calibrated": self.calibrated,
                 "thigh_angle": None,
+                "neck_drift": None,
+                "torso_drift": None,
+                "slouch_part": None,
             }
 
         neck_score = angles.posture_score(neck, self.baseline["neck"], self.tolerance)
         torso_score = angles.posture_score(torso, self.baseline["torso"], self.tolerance)
         raw = angles.combine_scores(neck_score, torso_score)
         smoothed = self._ema.update(raw)
+
+        # How far each part has drifted past *this person's own* upright
+        # baseline, and which part is actually giving way. The roasts use this
+        # so the insult names the real failure (head forward vs back hunching).
+        neck_drift = max(0.0, neck - self.baseline["neck"])
+        torso_drift = max(0.0, torso - self.baseline["torso"])
+        if neck_drift > torso_drift + 3.0:
+            part = "neck"
+        elif torso_drift > neck_drift + 3.0:
+            part = "torso"
+        else:
+            part = "even"
+
         return {
             "ts": ts,
             "person": person,
@@ -146,6 +162,9 @@ class PostureDetector:
             "raw_score": round(raw, 3),
             "calibrated": self.calibrated,
             "thigh_angle": round(thigh, 2) if thigh is not None else None,
+            "neck_drift": round(neck_drift, 2),
+            "torso_drift": round(torso_drift, 2),
+            "slouch_part": part,
         }
 
     # -- overlay ----------------------------------------------------------

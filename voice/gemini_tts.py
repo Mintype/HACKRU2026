@@ -11,12 +11,38 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import time
 from pathlib import Path
 from typing import Optional
 
 from . import wavutil
 
 log = logging.getLogger(__name__)
+
+#: Gemini's free tier allows only a handful of TTS requests per day, so once a
+#: 429 comes back we stop asking for a while instead of burning the quota (and
+#: the logs) on every clip the pool wants.
+MAX_BACKOFF_SECONDS = 6 * 3600
+
+
+def is_quota_error(message: str) -> bool:
+    text = (message or "").upper()
+    return "RESOURCE_EXHAUSTED" in text or "429" in text or "QUOTA" in text
+
+
+def quota_backoff_seconds(message: str, default: float = 3600.0) -> float:
+    """Pull the retry hint out of a Gemini 429 response."""
+    delay = default
+    match = re.search(r"retryDelay'?\s*:\s*'?(\d+)s", message or "")
+    if match:
+        delay = float(match.group(1))
+    else:
+        match = re.search(r"retry in (\d+)h(\d+)m", message or "")
+        if match:
+            delay = int(match.group(1)) * 3600 + int(match.group(2)) * 60
+    return max(60.0, min(delay, MAX_BACKOFF_SECONDS))
+
 
 DEFAULT_STYLE = (
     "Speak like a dramatic sports commentator who is deeply disappointed in "
@@ -38,10 +64,20 @@ class GeminiTTS:
         self.style = style
         self._client = None
         self.last_error: Optional[str] = None
+        self._disabled_until = 0.0
 
     @property
     def available(self) -> bool:
         return bool(self.api_key)
+
+    @property
+    def ready(self) -> bool:
+        """False while we are sitting out a quota reset."""
+        return self.available and time.time() >= self._disabled_until
+
+    @property
+    def backoff_remaining(self) -> float:
+        return max(0.0, self._disabled_until - time.time())
 
     def _get_client(self):
         if self._client is None:
@@ -56,6 +92,9 @@ class GeminiTTS:
         if not self.available:
             self.last_error = "no GEMINI_API_KEY"
             return False
+        if not self.ready:
+            self.last_error = f"quota backoff, {int(self.backoff_remaining // 60)} min left"
+            return False
         try:
             pcm, sample_rate, channels = self._call(text)
             if not pcm:
@@ -66,8 +105,17 @@ class GeminiTTS:
             self.last_error = None
             return True
         except Exception as exc:
-            self.last_error = str(exc)
-            log.warning("Gemini TTS failed (%s); falling back to local TTS", exc)
+            message = str(exc)
+            self.last_error = message
+            if is_quota_error(message):
+                delay = quota_backoff_seconds(message)
+                self._disabled_until = time.time() + delay
+                log.warning(
+                    "Gemini TTS quota reached; using the local voice for %.0f min",
+                    delay / 60.0,
+                )
+            else:
+                log.warning("Gemini TTS failed (%s); falling back to local TTS", message)
             return False
 
     def _call(self, text: str):

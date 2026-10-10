@@ -628,7 +628,12 @@
     setState($("sys-bt"), btOn ? "connected" : btSet ? "disconnected" : "not set", btOn ? "ok" : btSet ? "warn" : "none");
     $("sys-route").textContent = audio.route || "\u2014";
     setState($("sys-gemini"), voice.gemini_text ? "live" : "offline fallback", voice.gemini_text ? "ok" : "warn");
-    setState($("sys-tts"), voice.gemini_tts ? "live" : "local fallback", voice.gemini_tts ? "ok" : "warn");
+    const ttsReady = voice.gemini_tts_ready !== false;
+    setState(
+      $("sys-tts"),
+      voice.gemini_tts ? (ttsReady ? "live" : "quota hold") : "local fallback",
+      voice.gemini_tts && ttsReady ? "ok" : "warn"
+    );
     setState($("sys-local"), voice.local_tts || "none", voice.local_tts ? "ok" : "none");
     $("sys-pool").textContent = `${pool.ready ?? 0}/${pool.target ?? 0}`;
   }

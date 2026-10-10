@@ -30,7 +30,10 @@ DEFAULTS: Dict[str, Any] = {
     "nice_mode": False,
     "mirror": False,
     "audio_route": "bluetooth",  # bluetooth | cast | off
-    "roast_pool_size": 9,
+    # Clips are pre-generated with Gemini TTS, whose free tier allows only ~10
+    # requests/day, so the default pool is small enough to fit a daily quota.
+    # Raise this (and the quota) for more variety.
+    "roast_pool_size": 3,
     "cast_name": "",
 }
 

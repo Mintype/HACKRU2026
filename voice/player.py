@@ -139,6 +139,15 @@ class AudioPlayer(threading.Thread):
             return
         self._record(clip.text, self.route)
 
+    def play_file(self, path, *, try_cast: bool = False) -> bool:
+        """Play a clip synchronously (used by ``run.py --test-voice``)."""
+        if self.route == "off" or not path:
+            return False
+        ok = self._play_bluetooth(str(path))
+        if not ok and try_cast and self.cast_name:
+            ok = self._play_cast(str(path))
+        return ok
+
     def _record(self, text: str, route: str) -> None:
         self.last_text = text
         self.last_route_used = route

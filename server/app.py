@@ -152,10 +152,15 @@ class Coach:
     # -- context for the roast prompt ------------------------------------
     def roast_context(self) -> Dict:
         snap = self.state_machine.snapshot()
+        reading = self.vision.latest_reading() or {}
         return {
             "slouch_count": snap.get("slouch_count", 0),
             "session_minutes": snap.get("session_minutes", 0.0),
             "worst_neck_angle": snap.get("worst_neck_angle"),
+            "worst_torso_angle": snap.get("worst_torso_angle"),
+            "slouch_part": snap.get("slouch_part"),
+            "neck_drift": reading.get("neck_drift"),
+            "torso_drift": reading.get("torso_drift"),
         }
 
     # -- callbacks --------------------------------------------------------

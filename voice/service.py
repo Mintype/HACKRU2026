@@ -110,26 +110,38 @@ class RoastService:
         with self._lock:
             exclude = list(self._recent)
         nice = self._nice()
-        text = fallback_one(tier="mild" if nice else tier, nice=nice, exclude=exclude)
+        context = self.context_provider() or {}
+        text = fallback_one(
+            tier="mild" if nice else tier,
+            nice=nice,
+            exclude=exclude,
+            part=context.get("slouch_part"),
+        )
         return self._personalise_text(text)
 
     def _personalise_text(self, text: str) -> str:
-        """Fill the ``{n}`` slouch counter used by some fallback lines."""
-        count = (self.context_provider() or {}).get("slouch_count")
-        if not count:
+        """Fill ``{n}`` if present, and never let a literal placeholder through.
+
+        Clips are pre-generated at startup (before any slouch has been counted),
+        so a leftover ``{n}`` must never be synthesised into audio.
+        """
+        if "{n}" not in text:
             return text
-        return text.replace("{n}", str(count))
+        count = (self.context_provider() or {}).get("slouch_count")
+        cleaned = text.replace("{n}", str(count) if count else "")
+        return " ".join(cleaned.replace(" .", ".").replace(" ,", ",").split())
 
     def _text_source(self, tier: str, count: int) -> List[Dict]:
         nice = self._nice()
         with self._lock:
             exclude = list(self._recent)
+        context = self.context_provider() or {}
         items: List[Dict] = []
         if self.writer.available:
             items = self.writer.generate(
                 count=count,
                 tier=tier,
-                context=self.context_provider(),
+                context=context,
                 nice=nice,
                 exclude=exclude,
             )
@@ -140,6 +152,7 @@ class RoastService:
                 tier=tier,
                 nice=nice,
                 exclude=exclude + [i["text"] for i in items],
+                part=context.get("slouch_part"),
             )
         for item in items[:count]:
             item["text"] = self._personalise_text(item["text"])
@@ -150,7 +163,7 @@ class RoastService:
         path = config.ROAST_DIR / f"roast_{digest}.wav"
         if path.exists() and path.stat().st_size > 0:
             return str(path)
-        if self.tts.available and self.tts.synthesize(text, path):
+        if self.tts.ready and self.tts.synthesize(text, path):
             return str(path)
         if self.local_tts.available and self.local_tts.synthesize(text, path):
             return str(path)
@@ -164,6 +177,7 @@ class RoastService:
             "gemini_text": self.writer.available,
             "gemini_text_error": self.writer.last_error,
             "gemini_tts": self.tts.available,
+            "gemini_tts_ready": getattr(self.tts, "ready", self.tts.available),
             "gemini_tts_error": self.tts.last_error,
             "local_tts": self.local_tts.engine,
             "nice_mode": self._nice(),

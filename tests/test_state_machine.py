@@ -13,8 +13,8 @@ from server.state_machine import (
 )
 
 
-def reading(ts, score, *, person=True, seated=True, neck=15.0, torso=6.0) -> Dict:
-    return {
+def reading(ts, score, *, person=True, seated=True, neck=15.0, torso=6.0, part=None) -> Dict:
+    item = {
         "ts": float(ts),
         "person": person,
         "seated": seated,
@@ -22,6 +22,11 @@ def reading(ts, score, *, person=True, seated=True, neck=15.0, torso=6.0) -> Dic
         "torso_angle": torso,
         "score": score,
     }
+    if part is not None:
+        item["slouch_part"] = part
+        item["neck_drift"] = max(0.0, neck - 12.0)
+        item["torso_drift"] = max(0.0, torso - 4.0)
+    return item
 
 
 def feed(machine, start, seconds, score, **kwargs) -> List[Dict]:
@@ -173,6 +178,15 @@ class TestStateMachine(unittest.TestCase):
             events += self.machine.update(reading(start + 2 + i, 0.95, neck=10.0, torso=3.0))
         self.assertIn("calibrated", event_names(events))
         self.assertEqual(self.machine.state, GOOD)
+
+    def test_roast_due_names_the_failing_part(self):
+        start = with_session(self.machine)
+        events = feed(self.machine, start, 31, 0.5, neck=45.0, torso=6.0, part="neck")
+        due = [e for e in events if e["event"] == "roast_due"][0]
+        self.assertEqual(due["slouch_part"], "neck")
+        self.assertEqual(due["worst_neck_angle"], 45.0)
+        self.assertIn("worst_torso_angle", due)
+        self.assertEqual(self.machine.snapshot()["slouch_part"], "neck")
 
     def test_snapshot_fields(self):
         start = with_session(self.machine)

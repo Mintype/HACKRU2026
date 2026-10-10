@@ -126,8 +126,24 @@ def _context_lines(context: Dict) -> List[str]:
         lines.append(f"- This is slouch number {context['slouch_count']} this session.")
     if context.get("session_minutes") is not None:
         lines.append(f"- The session has been running about {context['session_minutes']} minutes.")
+
+    part = context.get("slouch_part")
+    if part == "neck":
+        lines.append("- What is actually failing: the head is jutting forward off the neck.")
+    elif part == "torso":
+        lines.append("- What is actually failing: the upper back is hunching forward.")
+    elif part == "even":
+        lines.append("- What is actually failing: everything is folding forward at once.")
+
     if context.get("worst_neck_angle") is not None:
         lines.append(f"- Worst forward-head angle so far: {context['worst_neck_angle']} degrees from vertical.")
+    if context.get("worst_torso_angle"):
+        lines.append(f"- Worst torso angle so far: {context['worst_torso_angle']} degrees from vertical.")
+    if context.get("neck_drift") is not None and context.get("torso_drift") is not None:
+        lines.append(
+            "- Drift past their own upright calibration right now: "
+            f"neck {context['neck_drift']} deg, torso {context['torso_drift']} deg."
+        )
     return lines
 
 
@@ -265,6 +281,7 @@ class RoastWriter:
                 tier=tier,
                 nice=nice,
                 exclude=list(exclude) + [i["text"] for i in items],
+                part=(context or {}).get("slouch_part"),
             )
         return items[:count]
 

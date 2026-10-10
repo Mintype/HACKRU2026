@@ -66,6 +66,9 @@ class PostureStateMachine:
         self.slouch_count = 0
         self.roasts_due = 0
         self.worst_neck_angle = 0.0
+        self.worst_torso_angle = 0.0
+        self.slouch_part = "even"
+        self._part_votes: Dict[str, int] = {"neck": 0, "torso": 0, "even": 0}
         self.cooldown_until = 0.0
         self.last_reading: Optional[Dict] = None
 
@@ -104,6 +107,9 @@ class PostureStateMachine:
             self.slouch_count = 0
             self.roasts_due = 0
             self.worst_neck_angle = 0.0
+            self.worst_torso_angle = 0.0
+            self.slouch_part = "even"
+            self._part_votes = {"neck": 0, "torso": 0, "even": 0}
             self.cooldown_until = 0.0
             events.append(
                 {
@@ -161,7 +167,7 @@ class PostureStateMachine:
             self.hysteresis_slouch = False
 
         if self.hysteresis_slouch:
-            events.extend(self._slouching(ts, neck, score))
+            events.extend(self._slouching(ts, reading))
         else:
             events.extend(self._recovering(ts))
         return events
@@ -183,6 +189,8 @@ class PostureStateMachine:
             "slouch_count": self.slouch_count,
             "roasts_due": self.roasts_due,
             "worst_neck_angle": round(self.worst_neck_angle, 1),
+            "worst_torso_angle": round(self.worst_torso_angle, 1),
+            "slouch_part": self.slouch_part,
             "slouch_seconds": round(max(0.0, now - self.slouch_since), 1) if self.slouch_since else 0.0,
             "cooldown_remaining": round(max(0.0, self.cooldown_until - now), 1),
             "calibrating": self.state == CALIBRATING,
@@ -194,9 +202,15 @@ class PostureStateMachine:
         }
 
     # ------------------------------------------------------------- helpers
-    def _slouching(self, ts: float, neck: float, score: float) -> List[Dict]:
+    def _slouching(self, ts: float, reading: Dict) -> List[Dict]:
         events: List[Dict] = []
         self.good_since = None
+
+        neck = float(reading.get("neck_angle") or 0.0)
+        torso = float(reading.get("torso_angle") or 0.0)
+        score = reading.get("score")
+        score = float(score) if score is not None else 0.0
+        part = str(reading.get("slouch_part") or "even")
 
         if self.slouch_since is None:
             self.slouch_since = ts
@@ -204,9 +218,18 @@ class PostureStateMachine:
             self.roasted = False
             self.slouch_count += 1
             self.worst_neck_angle = neck
+            self.worst_torso_angle = torso
+            self._part_votes = {"neck": 0, "torso": 0, "even": 0}
             self._transition(ts, SLOUCHING, events)
         else:
             self.worst_neck_angle = max(self.worst_neck_angle, neck)
+            self.worst_torso_angle = max(self.worst_torso_angle, torso)
+
+        # Which part keeps giving way over this episode; that is what the roast
+        # should be about.
+        if part in self._part_votes:
+            self._part_votes[part] += 1
+        self.slouch_part = max(self._part_votes, key=self._part_votes.get)
 
         elapsed = ts - self.slouch_since
 
@@ -221,6 +244,8 @@ class PostureStateMachine:
                     "slouch_count": self.slouch_count,
                     "session_minutes": self._session_minutes(ts),
                     "worst_neck_angle": round(self.worst_neck_angle, 1),
+                    "worst_torso_angle": round(self.worst_torso_angle, 1),
+                    "slouch_part": self.slouch_part,
                     "state": WARNED,
                 }
             )
@@ -238,6 +263,8 @@ class PostureStateMachine:
                     "slouch_count": self.slouch_count,
                     "session_minutes": self._session_minutes(ts),
                     "worst_neck_angle": round(self.worst_neck_angle, 1),
+                    "worst_torso_angle": round(self.worst_torso_angle, 1),
+                    "slouch_part": self.slouch_part,
                     "slouch_seconds": round(elapsed, 1),
                     "score": round(score, 3),
                     "state": ROASTED,

@@ -32,6 +32,12 @@ class TestFakeReadings(unittest.TestCase):
         deltas = {round(readings[i + 1]["ts"] - readings[i]["ts"], 5) for i in range(50)}
         self.assertEqual(deltas, {0.1})
 
+    def test_readings_report_the_failing_part(self):
+        readings = list(scripted_readings(start=0.0, fps=10.0, cycles=1))
+        self.assertTrue(all("slouch_part" in r for r in readings))
+        parts = {r["slouch_part"] for r in readings}
+        self.assertTrue(parts <= {"neck", "torso", "even", None})
+
     def test_scripted_readings_drive_a_full_session(self):
         from server.state_machine import PostureStateMachine
 

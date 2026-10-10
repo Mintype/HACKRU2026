@@ -58,6 +58,19 @@ class TestPromptAndValidation(unittest.TestCase):
         self.assertIn("insult", roast.lower())
         self.assertIn("encouragement", nice.lower())
 
+    def test_prompt_names_the_failing_part(self):
+        neck = build_prompt(count=3, tier="mild", context={"slouch_part": "neck"})
+        self.assertIn("head is jutting forward", neck)
+        torso = build_prompt(count=3, tier="mild", context={"slouch_part": "torso"})
+        self.assertIn("upper back is hunching", torso)
+        rich = build_prompt(
+            count=3,
+            tier="mild",
+            context={"slouch_count": 7, "neck_drift": 18.0, "torso_drift": 2.0},
+        )
+        self.assertIn("slouch number 7", rich)
+        self.assertIn("neck 18.0 deg", rich)
+
     def test_every_token_is_substituted(self):
         for nice_mode in (False, True):
             prompt = build_prompt(
@@ -154,11 +167,53 @@ class TestRoastPersonalisation(unittest.TestCase):
         service = self._service({})
         self.assertEqual(service._personalise_text("Sit up."), "Sit up.")
 
+    def test_placeholder_never_survives_without_a_count(self):
+        service = self._service({})
+        self.assertNotIn("{n}", service._personalise_text("Slouch {n}. Sit up."))
+
+    def test_fallback_batch_aims_at_the_failing_part(self):
+        neck = roasts.fallback_batch(count=4, tier="mild", part="neck")
+        self.assertTrue(any(item["text"] in roasts.NECK for item in neck))
+        torso = roasts.fallback_batch(count=4, tier="mild", part="torso")
+        self.assertTrue(any(item["text"] in roasts.TORSO for item in torso))
+
     def test_fallback_pool_leaves_no_braces(self):
         service = self._service({"slouch_count": 7})
         for tier in ("mild", "medium", "spicy"):
             for item in service._text_source(tier, 6):
                 self.assertNotIn("{n}", item["text"])
+
+
+class TestGeminiTTSQuotaBackoff(unittest.TestCase):
+    """The Gemini TTS free tier allows only ~10 requests/day, so a 429 must not
+    be retried on every clip the pool wants."""
+
+    def test_quota_error_stops_further_attempts(self):
+        import pathlib
+        import tempfile
+
+        from voice.gemini_tts import GeminiTTS, is_quota_error, quota_backoff_seconds
+
+        self.assertTrue(is_quota_error("429 RESOURCE_EXHAUSTED"))
+        self.assertFalse(is_quota_error("connection reset by peer"))
+        self.assertAlmostEqual(quota_backoff_seconds("'retryDelay': '14287s'"), 14287.0, delta=1)
+        self.assertAlmostEqual(quota_backoff_seconds("retry in 3h58m7s"), 3 * 3600 + 58 * 60, delta=1)
+
+        tts = GeminiTTS(api_key="fake-key")
+        calls = {"n": 0}
+
+        def boom(text):
+            calls["n"] += 1
+            raise RuntimeError("429 RESOURCE_EXHAUSTED ... 'retryDelay': '14287s'")
+
+        tts._call = boom
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp) / "line.wav"
+            self.assertFalse(tts.synthesize("Sit up.", out))
+            self.assertFalse(tts.ready)
+            self.assertGreater(tts.backoff_remaining, 0)
+            self.assertFalse(tts.synthesize("Sit up again.", out))
+            self.assertEqual(calls["n"], 1)
 
 
 if __name__ == "__main__":

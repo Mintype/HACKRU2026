@@ -96,6 +96,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         help="probe camera indices, print them and exit")
     parser.add_argument("--list-snapshots", dest="list_snapshots", action="store_true",
                         help="with --list-cameras, save one snapshot per camera to data/camera-scan/")
+    parser.add_argument("--test-voice", dest="test_voice", nargs="?",
+                        const="Sit up straight. Your spine has filed a complaint.",
+                        default=None, metavar="TEXT",
+                        help="synthesize one line with the configured TTS, play it and exit")
     parser.add_argument("--preview", action="store_true",
                         help="open a standalone preview window instead of the website")
     parser.add_argument("--video", type=str, default=None, help="use a video file instead of the webcam")
@@ -185,6 +189,46 @@ def preview_loop(coach) -> int:
     return 0
 
 
+def test_voice_command(text: str) -> int:
+    """Synthesize one line with whatever TTS is configured, then play it."""
+    from voice.gemini_tts import GeminiTTS
+    from voice.tts_local import LocalTTS
+
+    out = config.ROAST_DIR / "voice-test.wav"
+    gemini = GeminiTTS()
+    print(f"  Gemini voice : {'key found' if gemini.available else 'NO GEMINI_API_KEY (add it to .env)'}")
+    print(f"  model        : {gemini.model}")
+    print(f"  voice        : {gemini.voice}")
+    print(f"  line         : {text!r}\n")
+
+    if gemini.available and gemini.synthesize(text, out):
+        print(f"  wrote        : {out}  ({out.stat().st_size} bytes)")
+        _play(out)
+        return 0
+    if gemini.available:
+        print(f"  Gemini TTS failed: {gemini.last_error}")
+
+    local = LocalTTS()
+    print(f"  local engine : {local.engine or 'none available'}")
+    if local.available and local.synthesize(text, out):
+        print(f"  wrote        : {out}  ({out.stat().st_size} bytes) [local fallback]")
+        _play(out)
+        return 0
+
+    print("  nothing could synthesize audio: add GEMINI_API_KEY or install espeak-ng/piper")
+    return 1
+
+
+def _play(path) -> None:
+    from voice.player import AudioPlayer
+
+    player = AudioPlayer(route="bluetooth")
+    if player.play_file(path):
+        print("  played       : yes")
+    else:
+        print(f"  played       : no audio player found - open it yourself: {path}")
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     config.load_env()
@@ -200,6 +244,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.list_cameras:
         return list_cameras_command(args)
+
+    if args.test_voice is not None:
+        return test_voice_command(args.test_voice)
 
     app = create_app(
         simulate=args.simulate,
