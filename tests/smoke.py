@@ -81,7 +81,10 @@ def main() -> int:
     jpeg = coach.vision.latest_jpeg()
     print("  frame   :", f"{len(jpeg)} bytes JPEG" if jpeg else "no OpenCV (video feed disabled)")
 
-    check("GET /api/roasts", client.get("/api/roasts"))
+    shame = check("GET /api/roasts", client.get("/api/roasts")).get_json()
+    assert len(shame["roasts"]) <= 3, shame
+    limited = check("GET /api/roasts?limit=1", client.get("/api/roasts?limit=1")).get_json()
+    assert len(limited["roasts"]) <= 1, limited
     check("POST /api/calibrate", client.post("/api/calibrate"))
 
     # -- wait for a real roast_due to reach the DB -----------------------

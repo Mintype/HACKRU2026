@@ -332,7 +332,9 @@ def create_app(
     def api_roasts():
         # The hall of shame is "what has it said lately", so it spans sessions
         # and includes test roasts (which may have no session at all).
-        return jsonify({"session_id": coach.vision.session_id, "roasts": coach.db.recent_roasts(25)})
+        limit = request.args.get("limit", default=3, type=int)
+        limit = max(1, min(int(limit or 3), 50))
+        return jsonify({"session_id": coach.vision.session_id, "roasts": coach.db.recent_roasts(limit)})
 
     @app.get("/api/status")
     def api_status():

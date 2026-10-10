@@ -11,6 +11,8 @@
   const TOPBAR = 44;
   const GAP = 12;
   const EDGE = 12;
+  //: How many roasts the hall of shame keeps on screen.
+  const SHAME_LIMIT = 3;
   const STORE_KEY = "posturecoach.hud.v4";
 
   /* ------------------------------------------------------------ registry */
@@ -589,7 +591,7 @@
       return;
     }
     list.innerHTML = items
-      .slice(0, 12)
+      .slice(0, SHAME_LIMIT)
       .map((r) => {
         const bits = [
           r.origin === "test" ? "test" : null,
@@ -738,7 +740,7 @@
 
   async function fetchRoasts() {
     try {
-      const data = await fetchJSON("/api/roasts");
+      const data = await fetchJSON(`/api/roasts?limit=${SHAME_LIMIT}`);
       renderRoasts(data.roasts || []);
     } catch (e) {
       /* ignore */

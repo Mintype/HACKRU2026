@@ -107,6 +107,13 @@ class TestDatabase(unittest.TestCase):
         # session-scoped queries still ignore the untethered one
         self.assertEqual([r["text"] for r in self.db.session_roasts(self.session)], ["Auto line"])
 
+    def test_recent_roasts_limit(self):
+        for i in range(5):
+            self.db.log_roast(None, float(i), f"line {i}", origin="test")
+        recent = self.db.recent_roasts(3)
+        self.assertEqual(len(recent), 3)
+        self.assertEqual(recent[0]["text"], "line 4")
+
     def test_an_older_database_gains_the_new_columns(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "old.db"
