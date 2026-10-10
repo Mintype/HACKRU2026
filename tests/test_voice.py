@@ -11,6 +11,32 @@ from voice.gemini_text import build_prompt, load_prompt_template, parse_roasts, 
 import config
 
 
+def offline_writer():
+    """A RoastWriter that cannot reach the network, whatever .env says."""
+    from voice.gemini_text import RoastWriter
+
+    writer = RoastWriter()
+    writer.api_key = ""
+    return writer
+
+
+def offline_tts():
+    """A GeminiTTS that cannot reach the network."""
+    from voice.gemini_tts import GeminiTTS
+
+    tts = GeminiTTS()
+    tts.api_key = ""
+    return tts
+
+
+def offline_service(**kwargs):
+    from voice.service import RoastService
+
+    kwargs.setdefault("writer", offline_writer())
+    kwargs.setdefault("tts", offline_tts())
+    return RoastService(**kwargs)
+
+
 class TestRoasts(unittest.TestCase):
     def test_tiers_escalate(self):
         self.assertEqual(roasts.tier_for(1), "mild")
@@ -212,7 +238,9 @@ class TestGeminiTTSQuotaBackoff(unittest.TestCase):
         tts._call = boom
         with tempfile.TemporaryDirectory() as tmp:
             out = pathlib.Path(tmp) / "line.wav"
-            self.assertFalse(tts.synthesize("Sit up.", out))
+            # the backoff warning is expected here; capture it instead of printing
+            with self.assertLogs("voice.gemini_tts", level="WARNING"):
+                self.assertFalse(tts.synthesize("Sit up.", out))
             self.assertFalse(tts.ready)
             self.assertGreater(tts.backoff_remaining, 0)
             self.assertFalse(tts.synthesize("Sit up again.", out))
@@ -259,9 +287,7 @@ class TestVoiceMode(unittest.TestCase):
             return True
 
     def _service(self, mode, gemini_ready=True):
-        from voice.service import RoastService
-
-        return RoastService(
+        return offline_service(
             player=self._Player(),
             tts=self._TTS(gemini_ready),
             local_tts=self._Local(),
@@ -327,6 +353,70 @@ class TestLocalVoiceSelection(unittest.TestCase):
         self.assertNotIn("SelectVoice", script)
 
 
+class TestLiveRoasts(unittest.TestCase):
+    """Score-triggered roasts can be generated live, without blocking vision."""
+
+    class _Settings:
+        def __init__(self, source="live", cooldown=30.0):
+            self._values = {
+                "roast_source": source,
+                "live_api_cooldown_seconds": cooldown,
+                "tts_mode": "local",
+                "nice_mode": False,
+            }
+
+        def get(self, key, default=None):
+            return self._values.get(key, default)
+
+    class _Player:
+        route = "off"
+
+        def __init__(self):
+            self.played = []
+
+        def play_clip(self, clip):
+            self.played.append(clip.text)
+            return True
+
+    class _NoLocalTTS:
+        available = False
+        engine = None
+
+        def synthesize(self, text, path):
+            return False
+
+    def _service(self, **kwargs):
+        return offline_service(
+            player=self._Player(),
+            local_tts=self._NoLocalTTS(),
+            settings=self._Settings(**kwargs),
+            context_provider=lambda: {},
+            pool_size=1,
+        )
+
+    def test_live_mode_queues_instead_of_blocking(self):
+        service = self._service()
+        self.assertIsNone(service.on_roast_due({"slouch_count": 1}))
+        self.assertEqual(service._live_queue.qsize(), 1)
+
+    def test_api_cooldown_gates_a_second_call(self):
+        service = self._service(cooldown=30.0)
+        self.assertTrue(service._api_cooldown_ok())
+        service._note_api_call()
+        self.assertFalse(service._api_cooldown_ok())
+        self.assertGreater(service._api_cooldown_seconds(), 0)
+
+    def test_pool_refilling_pauses_in_live_mode(self):
+        self.assertFalse(self._service()._should_refill_pool())
+        self.assertTrue(self._service(source="pool")._should_refill_pool())
+
+    def test_live_generation_always_returns_a_clip(self):
+        service = self._service(source="pool")
+        clip = service._make_live_clip("mild", {"event": "roast_due"})
+        self.assertTrue(clip.text)
+        self.assertEqual(clip.tier, "mild")
+
+
 class TestInsultLog(unittest.TestCase):
     """data/insults.txt — the never-repeat list."""
 
@@ -350,7 +440,6 @@ class TestInsultLog(unittest.TestCase):
     def test_delivered_insults_are_recorded_and_excluded(self):
         from voice.insults import InsultLog
         from voice.pool import Clip
-        from voice.service import RoastService
 
         class Player:
             route = "off"
@@ -359,7 +448,7 @@ class TestInsultLog(unittest.TestCase):
                 return True
 
         with tempfile.TemporaryDirectory() as tmp:
-            service = RoastService(player=Player(), context_provider=lambda: {})
+            service = offline_service(player=Player(), context_provider=lambda: {})
             service.insults = InsultLog(path=pathlib.Path(tmp) / "insults.txt")
             service._deliver(Clip(text="Sit up, you comma.", tier="mild"), {})
             self.assertEqual(service.insults.count, 1)
@@ -391,7 +480,6 @@ class TestOriginality(unittest.TestCase):
     def test_exclude_list_puts_the_newest_first(self):
         from voice.insults import InsultLog
         from voice.pool import Clip
-        from voice.service import RoastService
 
         class Player:
             route = "off"
@@ -400,7 +488,7 @@ class TestOriginality(unittest.TestCase):
                 return True
 
         with tempfile.TemporaryDirectory() as tmp:
-            service = RoastService(player=Player(), context_provider=lambda: {})
+            service = offline_service(player=Player(), context_provider=lambda: {})
             service.insults = InsultLog(path=pathlib.Path(tmp) / "insults.txt")
             service._deliver(Clip(text="first thing said", tier="mild"), {})
             service._deliver(Clip(text="second thing said", tier="mild"), {})

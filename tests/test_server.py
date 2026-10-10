@@ -128,6 +128,16 @@ class TestSettings(unittest.TestCase):
         settings.update({"tts_mode": "nonsense"})
         self.assertEqual(settings.get("tts_mode"), "auto")
 
+    def test_roast_source_and_score_trigger_are_validated(self):
+        settings = Settings(path=self.path)
+        settings.update({"roast_source": "pool", "bad_score_threshold": 0.3, "bad_score_seconds": 5})
+        self.assertEqual(settings.get("roast_source"), "pool")
+        self.assertEqual(settings.get("bad_score_threshold"), 0.3)
+        self.assertEqual(settings.get("bad_score_seconds"), 5.0)
+        settings.update({"roast_source": "nonsense", "bad_score_threshold": 5})
+        self.assertEqual(settings.get("roast_source"), "live")
+        self.assertEqual(settings.get("bad_score_threshold"), 1.0)
+
     def test_apply_to_machine_config(self):
         settings = Settings(path=self.path)
         settings.update({"warn_seconds": 4, "roast_seconds": 9, "lower_threshold": 0.6})
@@ -178,6 +188,18 @@ class TestRoastPool(unittest.TestCase):
         self.assertEqual(pool.voice_counts(), {"gemini": 2})
         self.assertEqual(pool.clear(), 2)
         self.assertEqual(pool.voice_counts(), {})
+
+    def test_pool_exposes_the_pause_hook(self):
+        pool = RoastPool(
+            text_source=lambda tier, count: [],
+            synthesize=lambda text, tier=None: None,
+            should_refill=lambda: False,
+            size=1,
+            tiers=("mild",),
+            log_fn=lambda *_: None,
+        )
+        self.assertIsNotNone(pool.should_refill)
+        self.assertFalse(pool.should_refill())
 
     def test_pool_exposes_ready_texts(self):
         pool = RoastPool(

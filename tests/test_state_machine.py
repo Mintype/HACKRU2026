@@ -188,6 +188,45 @@ class TestStateMachine(unittest.TestCase):
         self.assertIn("worst_torso_angle", due)
         self.assertEqual(self.machine.snapshot()["slouch_part"], "neck")
 
+    def test_bad_score_roasts_without_waiting_out_the_timer(self):
+        self.machine.config.roast_seconds = 600.0  # sustained path effectively off
+        self.machine.config.bad_score_threshold = 0.45
+        self.machine.config.bad_score_seconds = 3.0
+        start = with_session(self.machine)
+        events = feed(self.machine, start, 5, 0.2)
+        due = [e for e in events if e["event"] == "roast_due"]
+        self.assertEqual(len(due), 1)
+        self.assertEqual(due[0]["reason"], "bad_posture")
+
+    def test_bad_score_needs_to_hold_before_firing(self):
+        self.machine.config.roast_seconds = 600.0
+        self.machine.config.bad_score_threshold = 0.45
+        self.machine.config.bad_score_seconds = 5.0
+        start = with_session(self.machine)
+        events = feed(self.machine, start, 3, 0.2)
+        self.assertNotIn("roast_due", event_names(events))
+        events += feed(self.machine, start + 3, 3, 0.2)
+        self.assertIn("roast_due", event_names(events))
+
+    def test_bad_score_is_rate_limited_by_the_cooldown(self):
+        self.machine.config.roast_seconds = 600.0
+        self.machine.config.bad_score_threshold = 0.45
+        self.machine.config.bad_score_seconds = 3.0
+        self.machine.config.cooldown_seconds = 20.0
+        start = with_session(self.machine)
+        events = feed(self.machine, start, 60, 0.2)
+        due = [e for e in events if e["event"] == "roast_due"]
+        self.assertGreaterEqual(len(due), 2)
+        gaps = [round(due[i + 1]["ts"] - due[i]["ts"], 1) for i in range(len(due) - 1)]
+        self.assertTrue(all(gap >= 20.0 for gap in gaps), gaps)
+
+    def test_bad_score_trigger_can_be_disabled(self):
+        self.machine.config.roast_seconds = 600.0
+        self.machine.config.bad_score_threshold = 0.0
+        start = with_session(self.machine)
+        events = feed(self.machine, start, 30, 0.2)
+        self.assertNotIn("roast_due", event_names(events))
+
     def test_snapshot_fields(self):
         start = with_session(self.machine)
         feed(self.machine, start, 15, 0.5)

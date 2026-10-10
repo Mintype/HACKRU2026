@@ -53,6 +53,7 @@ class RoastPool(threading.Thread):
         size: int = 9,
         refill_interval: float = 1.5,
         max_batch: int = 4,
+        should_refill: Optional[Callable[[], bool]] = None,
         log_fn: Callable[[str], None] = log.info,
     ):
         super().__init__(name="roast-pool", daemon=True)
@@ -64,6 +65,7 @@ class RoastPool(threading.Thread):
         self.size = max(1, int(size))
         self.refill_interval = float(refill_interval)
         self.max_batch = max(1, int(max_batch))
+        self.should_refill = should_refill
         self.log = log_fn
 
         self._lock = threading.Lock()
@@ -138,6 +140,11 @@ class RoastPool(threading.Thread):
     def run(self) -> None:
         while not self._stop.is_set():
             try:
+                # Paused while roasts are generated live, so the two paths do not
+                # both spend the Gemini quota.
+                if self.should_refill is not None and not self.should_refill():
+                    self._stop.wait(self.refill_interval)
+                    continue
                 self.refill_once()
             except Exception as exc:  # never let the pool thread die
                 self.failures += 1

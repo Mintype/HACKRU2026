@@ -189,6 +189,14 @@
         <div class="field"><label for="roast_seconds">Roast (s)</label><input type="number" id="roast_seconds" name="roast_seconds" min="2" step="1" /></div>
         <div class="field"><label for="cooldown_seconds">Cooldown (s)</label><input type="number" id="cooldown_seconds" name="cooldown_seconds" min="0" step="5" /></div>
         <div class="field"><label for="delta_angle">Tolerance (&deg;)</label><input type="number" id="delta_angle" name="delta_angle" min="1" step="1" /></div>
+        <div class="field"><label for="bad_score_threshold">Roast below (score)</label><input type="number" id="bad_score_threshold" name="bad_score_threshold" min="0" max="1" step="0.05" /></div>
+        <div class="field"><label for="live_api_cooldown_seconds">API cooldown (s)</label><input type="number" id="live_api_cooldown_seconds" name="live_api_cooldown_seconds" min="0" step="5" /></div>
+        <div class="field wide"><label for="roast_source">Roast source</label>
+          <select id="roast_source" name="roast_source">
+            <option value="live">Live &mdash; ask Gemini at the slouch</option>
+            <option value="pool">Pre-generated pool &mdash; instant</option>
+          </select>
+        </div>
         <div class="field wide"><label for="audio_route">Audio</label>
           <select id="audio_route" name="audio_route">
             <option value="bluetooth">Bluetooth &mdash; Nest</option>
@@ -233,6 +241,7 @@
         <li><span>Local voice</span><b id="sys-local">&mdash;</b></li>
         <li><span>Voice mix</span><b id="sys-voice">&mdash;</b></li>
         <li><span>Insults used</span><b id="sys-used">&mdash;</b></li>
+        <li><span>Roast source</span><b id="sys-source">&mdash;</b></li>
         <li><span>Roast pool</span><b id="sys-pool">&mdash;</b></li>
       </ul>
     </div>

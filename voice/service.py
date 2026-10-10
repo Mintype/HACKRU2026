@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import queue
 import threading
 import time
 from collections import deque
@@ -55,11 +56,18 @@ class RoastService:
         self._recent: Deque[str] = deque(maxlen=10)
         self.insults = InsultLog()
         self._lock = threading.Lock()
+        self._stop = threading.Event()
+        #: Live roasts are generated on their own thread so the vision loop never
+        #: blocks on the network.
+        self._live_queue: "queue.Queue" = queue.Queue(maxsize=4)
+        self._live_thread = threading.Thread(target=self._live_loop, name="live-roasts", daemon=True)
+        self._api_ready_at = 0.0
         self.pool = RoastPool(
             text_source=self._text_source,
             synthesize=self._synthesize,
             context_provider=self.context_provider,
             voice_of=self._voice_from_path,
+            should_refill=self._should_refill_pool,
             tiers=TIERS,
             size=pool_size,
             log_fn=log_fn,
@@ -71,27 +79,105 @@ class RoastService:
             self.player.start()
         if not self.pool.is_alive():
             self.pool.start()
+        if not self._live_thread.is_alive():
+            self._live_thread.start()
 
     def stop(self) -> None:
+        self._stop.set()
+        try:
+            self._live_queue.put_nowait(None)
+        except queue.Full:
+            pass
         self.pool.stop()
         self.player.stop()
+
+    def _should_refill_pool(self) -> bool:
+        """Live roasts and the pool must not both spend the Gemini quota."""
+        return self._roast_source() != "live"
 
     # -- entry points -----------------------------------------------------
     def on_roast_due(self, event: Dict) -> Optional[Clip]:
         count = int(event.get("slouch_count") or 1)
         tier = tier_for(count)
-        clip = self.pool.take(tier) or self.pool.take_any()
-        if clip is None:
-            text = self._fallback_text(tier)
-            clip = Clip(text=text, tier=tier, path=self._synthesize(text), source="fallback")
-        return self._deliver(clip, event)
+
+        # Live mode: ask Gemini at the moment of the slouch. The API cooldown
+        # keeps a bad stretch from calling the model over and over.
+        if self._roast_source() == "live" and self._api_cooldown_ok():
+            try:
+                self._live_queue.put_nowait((tier, event))
+                self._note_api_call()
+                return None
+            except queue.Full:
+                self.log("[voice] live roast queue full; using a pooled clip")
+        return self._deliver(self._take_pooled(tier), event)
 
     def test_roast(self) -> Optional[Clip]:
-        clip = self.pool.take_any()
-        if clip is None:
-            text = self._fallback_text("mild")
-            clip = Clip(text=text, tier="mild", path=self._synthesize(text), source="fallback")
-        return self._deliver(clip, {"event": "test_roast"})
+        """The demo button: always immediate, so the route can report the text."""
+        return self._deliver(self._take_pooled("mild"), {"event": "test_roast"})
+
+    def _take_pooled(self, tier: str) -> Clip:
+        clip = self.pool.take(tier) or self.pool.take_any()
+        if clip is not None:
+            return clip
+        text = self._fallback_text(tier)
+        return Clip(text=text, tier=tier, path=self._synthesize(text, tier), source="fallback")
+
+    # -- live generation --------------------------------------------------
+    def _roast_source(self) -> str:
+        if self.settings is None:
+            return "pool"
+        source = str(self.settings.get("roast_source") or "pool").lower()
+        return source if source in {"live", "pool"} else "pool"
+
+    def _api_cooldown_seconds(self) -> float:
+        if self.settings is None:
+            return 30.0
+        try:
+            return max(0.0, float(self.settings.get("live_api_cooldown_seconds") or 0.0))
+        except (TypeError, ValueError):
+            return 30.0
+
+    def _api_cooldown_ok(self) -> bool:
+        return time.time() >= self._api_ready_at
+
+    def _note_api_call(self) -> None:
+        self._api_ready_at = time.time() + self._api_cooldown_seconds()
+
+    def _live_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                job = self._live_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if job is None:
+                break
+            tier, event = job
+            try:
+                self._deliver(self._make_live_clip(tier, event), event)
+            except Exception:  # a failed live roast must not kill the thread
+                log.warning("live roast generation failed", exc_info=True)
+
+    def _make_live_clip(self, tier: str, event: Dict) -> Clip:
+        """One brand-new roast from Gemini, then voice it."""
+        items = self.writer.generate(
+            count=1,
+            tier=tier,
+            context=self.context_provider() or {},
+            nice=self._nice(),
+            exclude=self._exclude_list(),
+        )
+        items = [item for item in items if item.get("text")]
+        if not items:
+            return self._take_pooled(tier)
+        item = items[0]
+        source = str(item.get("source") or "gemini")
+        if source == "fallback":
+            # Gemini had nothing new; an already-voiced pooled clip beats a repeat.
+            pooled = self.pool.take(tier) or self.pool.take_any()
+            if pooled is not None:
+                return pooled
+        text = self._personalise_text(item["text"])
+        return Clip(text=text, tier=tier, path=self._synthesize(text, tier), source=source)
 
     # -- internals --------------------------------------------------------
     def _deliver(self, clip: Clip, event: Dict) -> Optional[Clip]:
@@ -243,6 +329,9 @@ class RoastService:
             "gemini_tts_error": self.tts.last_error,
             "local_tts": self.local_tts.engine,
             "tts_mode": self._tts_mode(),
+            "roast_source": self._roast_source(),
+            "live_pending": self._live_queue.qsize(),
+            "api_cooldown_remaining": round(max(0.0, self._api_ready_at - time.time()), 1),
             "insults_used": self.insults.count,
             "insults_file": str(self.insults.path),
             "nice_mode": self._nice(),

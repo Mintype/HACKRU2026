@@ -653,6 +653,14 @@
     voiceCell.textContent = (voice.tts_mode || "auto") + (mix ? ` \u00b7 ${mix}` : "");
     voiceCell.className = kinds.length > 1 ? "warn" : "";
     $("sys-used").textContent = String(voice.insults_used ?? 0);
+
+    const source = voice.roast_source || "pool";
+    const pending = voice.live_pending || 0;
+    const apiWait = Math.ceil(voice.api_cooldown_remaining || 0);
+    $("sys-source").textContent =
+      source +
+      (pending ? ` \u00b7 ${pending} pending` : "") +
+      (source === "live" && apiWait > 0 ? ` \u00b7 api ${apiWait}s` : "");
     $("sys-pool").textContent = `${pool.ready ?? 0}/${pool.target ?? 0}`;
   }
 
@@ -741,12 +749,13 @@
 
   function fillSettings(settings) {
     if (!settings) return;
-    ["warn_seconds", "roast_seconds", "cooldown_seconds", "delta_angle"].forEach((key) => {
+    ["warn_seconds", "roast_seconds", "cooldown_seconds", "delta_angle", "bad_score_threshold", "live_api_cooldown_seconds"].forEach((key) => {
       const input = $("settings-form").elements[key];
       if (input && settings[key] !== undefined) input.value = settings[key];
     });
     if (settings.audio_route) $("settings-form").elements["audio_route"].value = settings.audio_route;
     if (settings.tts_mode) $("settings-form").elements["tts_mode"].value = settings.tts_mode;
+    if (settings.roast_source) $("settings-form").elements["roast_source"].value = settings.roast_source;
     if (settings.nice_mode !== undefined) $("nice-mode").checked = !!settings.nice_mode;
     if (settings.mirror !== undefined) {
       mirrorOn = !!settings.mirror;
@@ -814,6 +823,9 @@
         roast_seconds: Number(form.elements["roast_seconds"].value),
         cooldown_seconds: Number(form.elements["cooldown_seconds"].value),
         delta_angle: Number(form.elements["delta_angle"].value),
+        bad_score_threshold: Number(form.elements["bad_score_threshold"].value),
+        live_api_cooldown_seconds: Number(form.elements["live_api_cooldown_seconds"].value),
+        roast_source: form.elements["roast_source"].value,
         audio_route: form.elements["audio_route"].value,
         tts_mode: form.elements["tts_mode"].value,
         nice_mode: $("nice-mode").checked,

@@ -22,6 +22,8 @@ DEFAULTS: Dict[str, Any] = {
     "calibration_seconds": 5.0,
     "lower_threshold": 0.7,
     "upper_threshold": 0.8,
+    "bad_score_threshold": 0.45,
+    "bad_score_seconds": 3.0,
     # vision
     "delta_angle": 20.0,
     "camera_index": 0,
@@ -31,6 +33,8 @@ DEFAULTS: Dict[str, Any] = {
     "mirror": False,
     "tts_mode": "auto",  # auto | gemini | local  (force one for a consistent voice)
     "audio_route": "bluetooth",  # bluetooth | cast | off
+    "roast_source": "live",  # live | pool  (live asks Gemini at the moment of the slouch)
+    "live_api_cooldown_seconds": 30.0,
     # Clips are pre-generated with Gemini TTS, whose free tier allows only ~10
     # requests/day, so the default pool is small enough to fit a daily quota.
     # Raise this (and the quota) for more variety.
@@ -46,12 +50,16 @@ BOUNDS: Dict[str, tuple] = {
     "calibration_seconds": (1.0, 60.0),
     "lower_threshold": (0.05, 1.0),
     "upper_threshold": (0.05, 1.0),
+    "bad_score_threshold": (0.0, 1.0),
+    "bad_score_seconds": (0.0, 60.0),
+    "live_api_cooldown_seconds": (0.0, 3600.0),
     "delta_angle": (1.0, 60.0),
     "camera_index": (0, 16),
     "roast_pool_size": (1, 50),
 }
 
 AUDIO_ROUTES = ("bluetooth", "cast", "off")
+ROAST_SOURCES = ("live", "pool")
 TTS_MODES = ("auto", "gemini", "local")
 MODELS = ("lite", "full", "heavy")
 
@@ -130,6 +138,9 @@ class Settings:
         if key == "tts_mode":
             text = str(value).strip().lower()
             return text if text in TTS_MODES else DEFAULTS[key]
+        if key == "roast_source":
+            text = str(value).strip().lower()
+            return text if text in ROAST_SOURCES else DEFAULTS[key]
         if key == "model":
             text = str(value).strip().lower()
             return text if text in MODELS else DEFAULTS[key]
@@ -146,6 +157,8 @@ class Settings:
             "calibration_seconds",
             "lower_threshold",
             "upper_threshold",
+            "bad_score_threshold",
+            "bad_score_seconds",
         )
         with self._lock:
             for key in mapping:

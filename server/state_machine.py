@@ -48,6 +48,11 @@ class StateMachineConfig:
     calibration_seconds: float = 5.0
     lower_threshold: float = 0.7
     upper_threshold: float = 0.8
+    #: Score below which posture counts as properly bad, so it roasts without
+    #: waiting out ``roast_seconds``. 0 disables the score trigger.
+    bad_score_threshold: float = 0.45
+    #: The bad score must hold this long, so one noisy frame cannot fire an API call.
+    bad_score_seconds: float = 3.0
 
 
 class PostureStateMachine:
@@ -59,6 +64,7 @@ class PostureStateMachine:
 
         self.slouch_since: Optional[float] = None
         self.good_since: Optional[float] = None
+        self.bad_since: Optional[float] = None
         self.hysteresis_slouch = False
         self.warned = False
         self.roasted = False
@@ -110,6 +116,7 @@ class PostureStateMachine:
             self.worst_torso_angle = 0.0
             self.slouch_part = "even"
             self._part_votes = {"neck": 0, "torso": 0, "even": 0}
+            self.bad_since = None
             self.cooldown_until = 0.0
             events.append(
                 {
@@ -192,6 +199,7 @@ class PostureStateMachine:
             "worst_torso_angle": round(self.worst_torso_angle, 1),
             "slouch_part": self.slouch_part,
             "slouch_seconds": round(max(0.0, now - self.slouch_since), 1) if self.slouch_since else 0.0,
+            "bad_seconds": round(max(0.0, now - self.bad_since), 1) if self.bad_since else 0.0,
             "cooldown_remaining": round(max(0.0, self.cooldown_until - now), 1),
             "calibrating": self.state == CALIBRATING,
             "calibration_progress": (
@@ -219,6 +227,7 @@ class PostureStateMachine:
             self.slouch_count += 1
             self.worst_neck_angle = neck
             self.worst_torso_angle = torso
+            self.bad_since = ts
             self._part_votes = {"neck": 0, "torso": 0, "even": 0}
             self._transition(ts, SLOUCHING, events)
         else:
@@ -232,6 +241,15 @@ class PostureStateMachine:
         self.slouch_part = max(self._part_votes, key=self._part_votes.get)
 
         elapsed = ts - self.slouch_since
+
+        # Score-based trigger: proper bad posture roasts now rather than waiting
+        # out roast_seconds. It has to hold for bad_score_seconds first, so a
+        # single noisy reading cannot fire it.
+        if self.config.bad_score_threshold > 0 and score < self.config.bad_score_threshold:
+            if self.bad_since is None:
+                self.bad_since = ts
+        else:
+            self.bad_since = None
 
         if elapsed >= self.config.warn_seconds and not self.warned:
             self.warned = True
@@ -250,26 +268,42 @@ class PostureStateMachine:
                 }
             )
 
-        # Cooldown blocks the roast, not the tracking: the state still updates.
+        # Cooldown blocks roasts, not tracking: the state still updates.
+        fired = False
         if elapsed >= self.config.roast_seconds and not self.roasted and ts >= self.cooldown_until:
-            self.roasted = True
-            self.roasts_due += 1
-            self.cooldown_until = ts + self.config.cooldown_seconds
-            self._transition(ts, ROASTED, events)
-            events.append(
-                {
-                    "event": "roast_due",
-                    "ts": ts,
-                    "slouch_count": self.slouch_count,
-                    "session_minutes": self._session_minutes(ts),
-                    "worst_neck_angle": round(self.worst_neck_angle, 1),
-                    "worst_torso_angle": round(self.worst_torso_angle, 1),
-                    "slouch_part": self.slouch_part,
-                    "slouch_seconds": round(elapsed, 1),
-                    "score": round(score, 3),
-                    "state": ROASTED,
-                }
-            )
+            events.extend(self._fire_roast(ts, elapsed, score, "sustained_slouch"))
+            fired = True
+        if (
+            not fired
+            and self.bad_since is not None
+            and (ts - self.bad_since) >= self.config.bad_score_seconds
+            and ts >= self.cooldown_until
+        ):
+            events.extend(self._fire_roast(ts, elapsed, score, "bad_posture"))
+        return events
+
+    def _fire_roast(self, ts: float, elapsed: float, score: float, reason: str) -> List[Dict]:
+        """Emit ``roast_due`` and start the cooldown that rate-limits the next one."""
+        self.roasted = True
+        self.roasts_due += 1
+        self.cooldown_until = ts + self.config.cooldown_seconds
+        events: List[Dict] = []
+        self._transition(ts, ROASTED, events)
+        events.append(
+            {
+                "event": "roast_due",
+                "ts": ts,
+                "reason": reason,
+                "slouch_count": self.slouch_count,
+                "session_minutes": self._session_minutes(ts),
+                "worst_neck_angle": round(self.worst_neck_angle, 1),
+                "worst_torso_angle": round(self.worst_torso_angle, 1),
+                "slouch_part": self.slouch_part,
+                "slouch_seconds": round(elapsed, 1),
+                "score": round(score, 3),
+                "state": ROASTED,
+            }
+        )
         return events
 
     def _recovering(self, ts: float) -> List[Dict]:
@@ -296,6 +330,7 @@ class PostureStateMachine:
         self.warned = False
         self.roasted = False
         self.hysteresis_slouch = False
+        self.bad_since = None
 
     def _transition(self, ts: float, new_state: str, events: List[Dict]) -> None:
         if new_state == self.state:

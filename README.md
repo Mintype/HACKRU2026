@@ -173,10 +173,29 @@ Thresholds use hysteresis: enter slouching below **0.7**, return to good above
 
 ### Escalation
 
-- slouching for ~10 s → website turns yellow (`warn`)
-- slouching for ~30 s → `roast_due`
-- after a roast, a ~90 s cooldown blocks audio — but tracking continues
-- `away` (no person / not seated) is never roasted
+Two triggers — either one can fire a roast:
+
+- **sustained slouch** — slouching for `roast_seconds` (~30 s) → `roast_due`
+- **bad posture** — the score dropping below `bad_score_threshold` (~0.45) and
+  staying there for `bad_score_seconds` (~3 s) → `roast_due` straight away,
+  without waiting out the timer
+
+The event carries a `reason` (`sustained_slouch` or `bad_posture`). A
+`cooldown_seconds` gap (~90 s) applies to both, so a long bad stretch cannot
+spam. The website still turns yellow (`warn`) at ~10 s, and `away` (no person /
+not seated) is never roasted. Set `bad_score_threshold` to `0` to disable the
+score trigger entirely.
+
+### Where a roast comes from
+
+| `roast_source` | Behaviour |
+| -------------- | --------- |
+| `live` (default) | On `roast_due` the Pi asks Gemini for a fresh line at that moment, on a worker thread so the vision loop never blocks, then voices it. `live_api_cooldown_seconds` (~30 s) additionally rate-limits those calls. |
+| `pool` | A background worker keeps pre-generated clips ready, so the roast is instant and the model is never in the real-time path at all. |
+
+In `live` mode the pool stops refilling, so the two paths never both spend the
+Gemini quota. Live is a little slower (network round trip) but never repeats a
+line; the pool is instant but finite.
 
 ### Roast prompts
 
