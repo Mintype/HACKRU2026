@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Posture Coach</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='%23c9ced6' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='11' cy='5' r='2.4'/%3E%3Cpath d='M11 7.4V14h7v6'/%3E%3C/g%3E%3C/svg%3E" />
+<link rel="stylesheet" href="{{ url_for('static', filename='fonts.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+<!-- Fullscreen feed ------------------------------------------------------- -->
+<div id="stage">
+  <img id="feed" src="/video_feed" alt="Live side-view feed" />
+  <div id="scrim"></div>
+
+  <div id="calib">
+    <div class="calib-card">
+      <span class="eyebrow">Calibration</span>
+      <strong>Sit up straight</strong>
+      <div class="calib-track"><i id="calib-bar"></i></div>
+    </div>
+  </div>
+
+  <div id="caption">
+    <span class="eyebrow">Roast</span>
+    <p id="caption-text"></p>
+  </div>
+</div>
+
+<!-- Top bar --------------------------------------------------------------- -->
+<header id="topbar">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="11" cy="5" r="2.4" />
+      <path d="M11 7.4V14h7v6" />
+    </svg>
+    <span class="brand-name">Posture&nbsp;Coach</span>
+  </div>
+
+  <div id="state-chip" class="state state-away">
+    <i class="state-bar"></i><span id="state-text">away</span>
+  </div>
+
+  <!-- Only surfaces when the event stream actually drops. -->
+  <div id="conn" class="state offline hidden"><i class="state-bar"></i><span>offline</span></div>
+
+  <div id="session-clock" class="mono muted">no session</div>
+
+  <div class="spacer"></div>
+
+  <div id="hud-fps" class="mono muted">&mdash;</div>
+
+  <button id="btn-panels" class="icon-btn" title="Panels (P)" aria-label="Panels">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+    </svg>
+  </button>
+
+  <button id="btn-mirror" class="icon-btn" title="Mirror camera (M)" aria-label="Mirror camera">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+    </svg>
+  </button>
+
+  <button id="btn-fullscreen" class="icon-btn" title="Fullscreen (F)" aria-label="Toggle fullscreen">
+    <svg class="icon icon-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+    </svg>
+    <svg class="icon icon-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25" />
+    </svg>
+  </button>
+</header>
+
+<!-- Panel menu ------------------------------------------------------------ -->
+<div id="panel-menu" class="popover hidden">
+  <div class="popover-head">Panels</div>
+  <div id="panel-menu-list" class="menu-list"></div>
+  <div class="menu-sep"></div>
+  <label class="menu-row range">
+    <span>Dim video</span>
+    <input id="dim" type="range" min="0" max="80" step="1" />
+  </label>
+  <div class="menu-sep"></div>
+  <div class="menu-actions">
+    <button id="btn-reset-layout" class="btn">Reset layout</button>
+  </div>
+</div>
+
+<!-- HUD panels ------------------------------------------------------------ -->
+<div id="hud">
+
+  <section class="panel" data-panel="posture">
+    <header class="panel-head">
+      <h2>Posture</h2>
+      <div class="panel-actions">
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    </header>
+    <div class="panel-body">
+      <div class="metrics">
+        <div class="metric">
+          <label>Neck</label>
+          <div class="metric-value"><span id="neck-value" class="num">&mdash;</span><small>deg</small></div>
+        </div>
+        <div class="metric">
+          <label>Torso</label>
+          <div class="metric-value"><span id="torso-value" class="num">&mdash;</span><small>deg</small></div>
+        </div>
+      </div>
+      <div class="score">
+        <div class="score-row"><label>Score</label><span id="score-value" class="mono">&mdash;</span></div>
+        <div class="bar"><i id="score-bar"></i><span class="tick lo"></span><span class="tick hi"></span></div>
+      </div>
+      <div class="note"><span id="roast-timer" class="mono muted">no slouch</span></div>
+    </div>
+  </section>
+
+  <section class="panel" data-panel="stats">
+    <header class="panel-head">
+      <h2>Session</h2>
+      <div class="panel-actions">
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    </header>
+    <div class="panel-body">
+      <div class="stat-grid">
+        <div class="stat"><span id="stat-good" class="num">&mdash;</span><label>good</label></div>
+        <div class="stat"><span id="stat-slouches" class="num">&mdash;</span><label>slouches</label></div>
+        <div class="stat"><span id="stat-roasts" class="num">&mdash;</span><label>roasts</label></div>
+        <div class="stat"><span id="stat-streak" class="num">&mdash;</span><label>streak</label></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" data-panel="chart" data-resizable>
+    <header class="panel-head">
+      <h2>Score</h2>
+      <div class="panel-actions">
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    </header>
+    <div class="panel-body">
+      <canvas id="chart"></canvas>
+    </div>
+    <span class="panel-resize" data-resize title="Resize"></span>
+  </section>
+
+  <section class="panel" data-panel="controls" data-resizable>
+    <header class="panel-head">
+      <h2>Controls</h2>
+      <div class="panel-actions">
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    </header>
+    <div class="panel-body">
+      <div class="btn-row">
+        <button id="btn-calibrate" class="btn">Calibrate</button>
+        <button id="btn-roast" class="btn">Test roast</button>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="nice-mode" />
+        <span>Nice mode</span>
+      </label>
+      <form id="settings-form" class="form">
+        <div class="field"><label for="roast_seconds">Roast (s)</label><input type="number" id="roast_seconds" name="roast_seconds" min="2" step="1" /></div>
+        <div class="field"><label for="cooldown_seconds">Cooldown (s)</label><input type="number" id="cooldown_seconds" name="cooldown_seconds" min="0" step="5" /></div>
+        <div class="field"><label for="delta_angle">Tolerance (&deg;)</label><input type="number" id="delta_angle" name="delta_angle" min="1" step="1" /></div>
+        <div class="field"><label for="bad_score_threshold">Roast below (score)</label><input type="number" id="bad_score_threshold" name="bad_score_threshold" min="0" max="1" step="0.05" /></div>
+        <div class="field"><label for="sleep_threshold_seconds">Sleep after (s)</label><input type="number" id="sleep_threshold_seconds" name="sleep_threshold_seconds" min="0" step="5" /></div>
+        <div class="field"><label for="live_api_cooldown_seconds">API cooldown (s)</label><input type="number" id="live_api_cooldown_seconds" name="live_api_cooldown_seconds" min="0" step="5" /></div>
+        <div class="field wide"><label for="roast_source">Roast source</label>
+          <select id="roast_source" name="roast_source">
+            <option value="live">Live &mdash; ask Gemini at the slouch</option>
+            <option value="pool">Pre-generated pool &mdash; instant</option>
+          </select>
+        </div>
+        <div class="field wide"><label for="audio_route">Audio</label>
+          <select id="audio_route" name="audio_route">
+            <option value="bluetooth">Bluetooth &mdash; Nest</option>
+            <option value="cast">Wi-Fi cast</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
+        <div class="field wide"><label for="tts_mode">Voice</label>
+          <select id="tts_mode" name="tts_mode">
+            <option value="auto">Auto &mdash; ElevenLabs, else local</option>
+            <option value="elevenlabs">ElevenLabs only</option>
+            <option value="local">Local only (offline)</option>
+          </select>
+        </div>
+        <button type="submit" class="btn wide">Save</button>
+      </form>
+      <p id="settings-status" class="note"></p>
+    </div>
+    <span class="panel-resize" data-resize title="Resize"></span>
+  </section>
+
+  <section class="panel" data-panel="system">
+    <header class="panel-head">
+      <h2>System</h2>
+      <div class="panel-actions">
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    </header>
+    <div class="panel-body">
+      <ul class="kv">
+        <li><span>Detection</span><b id="sys-detect">&mdash;</b></li>
+        <li><span>Camera</span><b id="sys-mode">&mdash;</b></li>
+        <li><span>Rate</span><b id="sys-fps">&mdash;</b></li>
+        <li><span>Nest</span><b id="sys-bt">&mdash;</b></li>
+        <li><span>Audio</span><b id="sys-route">&mdash;</b></li>
+        <li><span>Gemini text</span><b id="sys-gemini">&mdash;</b></li>
+        <li><span>Voice</span><b id="sys-eleven">&mdash;</b></li>
+        <li><span>Local voice</span><b id="sys-local">&mdash;</b></li>
+        <li><span>Voice mix</span><b id="sys-voice">&mdash;</b></li>
+        <li><span>Insults used</span><b id="sys-used">&mdash;</b></li>
+        <li><span>Roast source</span><b id="sys-source">&mdash;</b></li>
+        <li><span>Roast pool</span><b id="sys-pool">&mdash;</b></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="panel" data-panel="debug">
+    <header class="panel-head">
+      <h2>Debug</h2>
+      <div class="panel-actions">
+        <button class="panel-btn" data-action="collapse" title="Collapse" aria-label="Collapse panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button class="panel-btn" data-action="hide" title="Hide" aria-label="Hide panel">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    </header>
+    <div class="panel-body">
+      <ul class="kv compact">
+        <li><span>State</span><b id="dbg-state">&mdash;</b></li>
+        <li><span>Detection</span><b id="dbg-detect">&mdash;</b></li>
+        <li><span>Score</span><b id="dbg-score">&mdash;</b></li>
+        <li><span>Neck</span><b id="dbg-neck">&mdash;</b></li>
+        <li><span>Torso</span><b id="dbg-torso">&mdash;</b></li>
+        <li><span>Failing part</span><b id="dbg-part">&mdash;</b></li>
+        <li><span>Sleeping</span><b id="dbg-sleep">&mdash;</b></li>
+        <li><span>Motion</span><b id="dbg-motion">&mdash;</b></li>
+        <li><span>Head down</span><b id="dbg-head">&mdash;</b></li>
+        <li><span>Slouched</span><b id="dbg-slouch">&mdash;</b></li>
+        <li><span>Next roast</span><b id="dbg-next">&mdash;</b></li>
+        <li><span>Cooldown</span><b id="dbg-cooldown">&mdash;</b></li>
+        <li><span>Calibration</span><b id="dbg-calib">&mdash;</b></li>
+        <li><span>Thresholds</span><b id="dbg-thresholds">&mdash;</b></li>
+        <li><span>Timers</span><b id="dbg-timers">&mdash;</b></li>
+        <li><span>Camera</span><b id="dbg-camera">&mdash;</b></li>
+        <li><span>Session</span><b id="dbg-session">&mdash;</b></li>
+        <li><span>Last event</span><b id="dbg-event">&mdash;</b></li>
+      </ul>
+    </div>
+  </section>
+
+</div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

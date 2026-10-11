@@ -1,0 +1,20 @@
+/* Self-hosted typefaces — no CDN, so the page works with the venue Wi-Fi off.
+   Overpass / Overpass Mono, SIL Open Font License 1.1 (originally for highway
+   signage; the mono is used here for alignment of live numbers).
+   Both are variable fonts, so one file covers the whole weight range. */
+
+@font-face {
+  font-family: 'Overpass';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/static/fonts/overpass-var.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Overpass Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/static/fonts/overpass-mono-var.woff2') format('woff2');
+}

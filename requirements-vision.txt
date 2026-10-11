@@ -1,0 +1,5 @@
+# Pose detection.  Kept separate because MediaPipe wheels are the most
+# likely install to fail (especially on the Pi) and the rest of the project
+# runs fine without it in --simulate mode.
+-r requirements.txt
+mediapipe>=0.10.14
