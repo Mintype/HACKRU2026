@@ -7,3 +7,6 @@ opencv-contrib-python>=4.9
 python-dotenv>=1.0
 google-genai>=1.0
 pychromecast>=14.0
+# Python 3.13 removed the stdlib `audioop` module that voice/wavutil.py uses;
+# this is its drop-in replacement.
+audioop-lts>=0.2; python_version >= "3.13"

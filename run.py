@@ -104,7 +104,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--preview", action="store_true",
                         help="open a standalone preview window instead of the website")
     parser.add_argument("--demo", action="store_true",
-                        help="short thresholds (roast 10s, cooldown 15s) so the whole cycle is visible fast")
+                        help="short thresholds (roast 5s, cooldown 10s) so the whole cycle is visible fast")
     parser.add_argument("--video", type=str, default=None, help="use a video file instead of the webcam")
     parser.add_argument("--model", type=str, default=None, choices=["lite", "full", "heavy"],
                         help="MediaPipe pose model (default lite on the Pi)")
@@ -329,8 +329,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         settings_path=args.settings,
         settings_overrides=(
             {
-                "roast_seconds": 10,
-                "cooldown_seconds": 15,
+                "roast_seconds": 5,
+                "cooldown_seconds": 10,
+                "live_api_cooldown_seconds": 5,
                 "calibration_seconds": 3,
                 "roast_pool_size": 2,
             }
@@ -340,7 +341,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     coach = app.coach
     if args.demo:
-        print("  demo   : roast 10s / cooldown 15s (not saved unless you press Save)")
+        print("  demo   : roast 5s / cooldown 10s (not saved unless you press Save)")
 
     if coach.simulate:
         mode = "SIMULATED feed"
