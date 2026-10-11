@@ -4,9 +4,9 @@ Used when Gemini text generation is unavailable, and always available for a
 fully offline demo.  Rules mirror the prompt files in ``voice/prompts/``:
 roast the *posture* only, PG, one breath, and actually funny.
 
-The voice is a furious chef, but the food is a garnish rather than the whole
-dish: two or three kitchen lines per pool, and every line short enough to land
-in one breath.  A plain furious line beats a forced food joke.
+The voice is a merciless roast comic, and every line is short enough to land
+in one breath.  The live prompt allows censored swearing (``BLEEP``); these
+offline lines stay clean.
 
 ``{n}`` is replaced with the slouch number for the session by
 :class:`voice.service.RoastService`.
@@ -38,8 +38,8 @@ MILD = [
     "Your shoulders called. They want to come back.",
     "Sit up. That is a chair, not a hammock.",
     "You drifted. The chair did not.",
-    "RAW. Sit up and start again.",
-    "Plated badly. Try it again, properly.",
+    "Sit up. Gravity is not your friend.",
+    "Wrong shape. Try sitting again, properly.",
 ]
 
 MEDIUM = [
@@ -63,8 +63,8 @@ MEDIUM = [
     "Even the chair is leaning away from you.",
     "That is a slump with a business plan.",
     "Sit up before your ribs meet your hips.",
-    "Soggy bottom. Straighten that spine.",
-    "Undercooked and oversold. Sit up.",
+    "You are melting like a candle. Stop.",
+    "That spine needs a building permit.",
 ]
 
 SPICY = [
@@ -88,7 +88,7 @@ SPICY = [
     "Sit up before the desk files a missing report.",
     "That hunch has tenure now.",
     "Your posture is a cautionary tale with a keyboard.",
-    "Burnt to a crisp. Out of my kitchen.",
+    "That slouch is a crime scene now.",
 ]
 
 #: Aimed at whichever part is actually giving way, mixed into the batch.
@@ -103,7 +103,7 @@ NECK = [
     "Head back. Your neck has somewhere to be.",
     "You are peering like the screen owes you money.",
     "Your head has left the rest of you behind.",
-    "Chin back. Your neck is overproofed dough.",
+    "Chin back. Your neck is a crane arm.",
     "Sit up. Your neck is not a hinge.",
 ]
 
@@ -118,22 +118,22 @@ TORSO = [
     "Your spine is doing an impression of a banana.",
     "Sit up. Your ribs deserve better than this.",
     "Your back wants a better chair, not a rescue.",
-    "Straighten up. Your spine is a collapsed souffle.",
+    "Straighten up. Your spine is a bent paperclip.",
     "Straighten up. Your back is folding again.",
 ]
 
 #: Sleep is its own fault: slumped, still, and gone. Picked when that fires.
 SLEEPING = [
-    "Wake up. Service started without you.",
-    "Asleep at the pass? Not in my kitchen.",
-    "Sit up. You are done, and so is the dish.",
-    "Wake up. Your spine is on the pass.",
+    "Wake up. The meeting started without you.",
+    "Asleep at the desk? Not on my watch.",
+    "Sit up. Naptime ended years ago.",
+    "Wake up. Your spine clocked out early.",
     "Napping at the table. Get up.",
     "That is not resting, that is a collapse.",
-    "Wake up. The dish is on fire.",
-    "Sleeping on the job? Out of my kitchen.",
+    "Wake up. The desk is not a pillow.",
+    "Sleeping on the job? Bold strategy.",
     "Wake up and sit up. In that order.",
-    "You slept through service. Sit up.",
+    "You slept through your own slouch. Sit up.",
 ]
 
 NICE = [
@@ -151,8 +151,8 @@ NICE = [
     "Your back just sent a thank you note.",
     "That is a posture worth keeping.",
     "Strong, tall, and quietly excellent.",
-    "Now that is cooked to perfection.",
-    "That is a dish I would serve. Stay there.",
+    "Now that is textbook alignment.",
+    "That posture belongs in a brochure. Stay there.",
 ]
 
 #: A fresh angle per batch, so consecutive roasts do not sound the same.
@@ -172,9 +172,6 @@ TOPICS = (
     "Write about the desk slowly claiming them as its own.",
     "Write as a building inspector condemning a structure.",
     "Write as the camera, which has seen all of this before.",
-    "Write as a furious chef inspecting a badly plated dish.",
-    "Write as a chef sending the dish back to the kitchen.",
-    "Write as a chef who is late for service and blames the spine.",
 )
 
 POOLS: Dict[str, List[str]] = {"mild": MILD, "medium": MEDIUM, "spicy": SPICY, "nice": NICE}

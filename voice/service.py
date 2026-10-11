@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Callable, Deque, Dict, List, Optional
 
 import config
+from . import bleep
 from .eleven_tts import ElevenLabsTTS
 from .gemini_text import RoastWriter
 from .insults import InsultLog
@@ -311,6 +312,16 @@ class RoastService:
         mode = self._tts_mode()
         digest = hashlib.md5(text.encode("utf-8")).hexdigest()[:10]
 
+        def speak_with(voice: str, line: str, path: Path) -> bool:
+            # A censored line is voiced around its BLEEPs and spliced with a tone.
+            if voice == "elevenlabs":
+                speak = lambda part, out: self.eleven.synthesize(part, out, tier)  # noqa: E731
+            else:
+                speak = self.local_tts.synthesize
+            if bleep.has_bleep(line):
+                return bleep.synthesize(line, path, speak)
+            return speak(line, path)
+
         def attempt(voice: str) -> Optional[str]:
             path = config.ROAST_DIR / f"roast_{digest}_{voice}.wav"
             if path.exists() and path.stat().st_size > 0:
@@ -318,10 +329,10 @@ class RoastService:
             if voice == "elevenlabs":
                 if mode == "local" or not self.eleven.available:
                     return None
-                return str(path) if self.eleven.synthesize(text, path, tier) else None
+                return str(path) if speak_with(voice, text, path) else None
             if mode == "elevenlabs" or not self.local_tts.available:
                 return None
-            return str(path) if self.local_tts.synthesize(text, path) else None
+            return str(path) if speak_with(voice, text, path) else None
 
         if mode == "local":
             return attempt("local")

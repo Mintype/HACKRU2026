@@ -87,14 +87,14 @@ class TestPromptAndValidation(unittest.TestCase):
         self.assertIn("insult", roast.lower())
         self.assertIn("praise", nice.lower())
 
-    def test_the_roast_prompt_is_a_concise_chef(self):
+    def test_the_roast_prompt_is_concise_and_censored(self):
         roast = load_prompt_template(False)
         lowered = roast.lower()
-        self.assertIn("chef", lowered)
         self.assertIn("comparison", lowered)
-        # The food is a garnish, not the whole dish, and the lines stay short.
-        self.assertIn("garnish", lowered)
         self.assertIn("3-9 words", lowered)
+        # Swearing is only ever the BLEEP marker, never the real word.
+        self.assertIn("BLEEP", roast)
+        self.assertNotIn("chef", lowered)
 
     def test_the_nice_prompt_is_short_and_does_not_force_food(self):
         nice = load_prompt_template(True).lower()
@@ -801,3 +801,42 @@ class TestElevenLabs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBleep(unittest.TestCase):
+    def test_split_marks_bleeps_and_drops_bare_punctuation(self):
+        from voice import bleep
+
+        self.assertEqual(bleep.split("Your neck is a BLEEP disgrace."), ["Your neck is a", None, "disgrace."])
+        self.assertEqual(bleep.split("That spine is BLEEP!"), ["That spine is", None])
+        self.assertEqual(bleep.split("Sit up."), ["Sit up."])
+        self.assertFalse(bleep.has_bleep("A bleeping chair."))  # only the capitalised marker
+
+    def test_synthesize_splices_a_tone_between_spoken_pieces(self):
+        from voice import bleep
+
+        spoken = []
+
+        def speak(text, path):
+            spoken.append(text)
+            # 0.2 s of audible noise at 22050 Hz, with the usual lead silence.
+            pcm = (b"\x00\x40\x00\xc0") * 2205
+            wavutil.write_wav(path, pcm, sample_rate=22050, lead_silence=0.5)
+            return True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "roast.wav"
+            self.assertTrue(bleep.synthesize("Your neck is a BLEEP disgrace.", out, speak))
+            self.assertEqual(spoken, ["Your neck is a", "disgrace."])
+            # Each piece's own lead silence is trimmed to a short pad; only the
+            # clip's Bluetooth lead-in remains in full.
+            piece = bleep.EDGE_PAD_SECONDS + 0.2
+            expected = 0.5 + piece + bleep.GAP_SECONDS + bleep.BLEEP_SECONDS + bleep.GAP_SECONDS + piece
+            self.assertAlmostEqual(wavutil.duration_seconds(out), expected, delta=0.05)
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["roast.wav"])
+
+    def test_a_failed_piece_fails_the_clip(self):
+        from voice import bleep
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(bleep.synthesize("Sit up, BLEEP now.", Path(tmp) / "x.wav", lambda t, p: False))
