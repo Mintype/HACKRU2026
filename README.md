@@ -99,6 +99,7 @@ with systemd (see [docs/REFERENCE.md](docs/REFERENCE.md#raspberry-pi-setup)).
 | ---- | ------------ |
 | `--demo` | Short timers for live demos: roast after 5 s, 10 s cooldown, 3 s calibration |
 | `--camera N` | Use webcam index `N` (find it with `--list-cameras`) |
+| `--force-seated` | Count anyone the camera sees as seated (when the desk or angle hides the thigh) |
 | `--simulate` | No camera: scripted readings and a synthetic stick figure |
 | `--test-voice "text"` | Speak one line through the configured voice and speaker, then exit |
 | `--no-audio` | Print roasts instead of playing them |

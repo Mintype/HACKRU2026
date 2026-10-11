@@ -45,6 +45,7 @@ class Coach:
         settings_path: Optional[str] = None,
         settings_overrides: Optional[Dict[str, object]] = None,
         fake_readings=None,
+        force_seated: bool = False,
     ):
         config.ensure_dirs()
         self.host = host
@@ -93,6 +94,7 @@ class Coach:
                 self.detector = PostureDetector(
                     landmarker,
                     tolerance=float(self.settings.get("delta_angle")),
+                    force_seated=force_seated,
                 )
                 self.source = open_source(source_spec, backend=resolve_backend(camera_backend))
             except Exception as exc:
@@ -219,6 +221,7 @@ def create_app(
     settings_path: Optional[str] = None,
     settings_overrides: Optional[Dict[str, object]] = None,
     fake_readings=None,
+    force_seated: bool = False,
 ) -> Flask:
     config.ensure_dirs()
     app = Flask(
@@ -241,6 +244,7 @@ def create_app(
         settings_path=settings_path,
         settings_overrides=settings_overrides,
         fake_readings=fake_readings,
+        force_seated=force_seated,
     )
     app.coach = coach  # type: ignore[attr-defined]
 

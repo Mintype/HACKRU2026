@@ -105,6 +105,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         help="open a standalone preview window instead of the website")
     parser.add_argument("--demo", action="store_true",
                         help="short thresholds (roast 5s, cooldown 10s) so the whole cycle is visible fast")
+    parser.add_argument("--force-seated", dest="force_seated", action="store_true",
+                        help="count any detected person as seated (when the camera cannot see the thigh)")
     parser.add_argument("--video", type=str, default=None, help="use a video file instead of the webcam")
     parser.add_argument("--model", type=str, default=None, choices=["lite", "full", "heavy"],
                         help="MediaPipe pose model (default lite on the Pi)")
@@ -327,6 +329,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         host=args.host,
         port=args.port,
         settings_path=args.settings,
+        force_seated=args.force_seated,
         settings_overrides=(
             {
                 "roast_seconds": 5,
@@ -342,6 +345,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     coach = app.coach
     if args.demo:
         print("  demo   : roast 5s / cooldown 10s (not saved unless you press Save)")
+    if args.force_seated:
+        print("  seated : forced (any detected person starts a session)")
 
     if coach.simulate:
         mode = "SIMULATED feed"

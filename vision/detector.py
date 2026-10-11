@@ -32,12 +32,16 @@ class PostureDetector:
         sleep_stillness: float = 0.006,
         sleep_head_delta: float = 20.0,
         sleep_head_fallback: float = 45.0,
+        force_seated: bool = False,
     ):
         self.landmarker = landmarker
         self.tolerance = float(tolerance)
         self.alpha = float(alpha)
         self.seated_threshold = float(seated_threshold)
         self.seated_delay = float(seated_delay)
+        #: Treat any detected person as seated (``run.py --force-seated``), for
+        #: setups where the camera cannot judge the thigh angle.
+        self.force_seated = bool(force_seated)
         self.standup_delay = float(standup_delay)
         self.min_visibility = float(min_visibility)
         #: Collapsed posture: the score at or below which a slump is a slump.
@@ -197,7 +201,9 @@ class PostureDetector:
 
     # -- sit-down detection ----------------------------------------------
     def _update_seated(self, ts: float, thigh: Optional[float], torso: float, hip) -> bool:
-        if thigh is not None:
+        if self.force_seated:
+            candidate = True
+        elif thigh is not None:
             candidate = thigh < self.seated_threshold
         else:
             # Desk hides the knee: person present + hip parked in one spot +

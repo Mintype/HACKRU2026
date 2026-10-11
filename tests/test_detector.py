@@ -70,6 +70,16 @@ class TestPostureDetector(unittest.TestCase):
         self.assertFalse(detector.process(frame=None, ts=1.0)["seated"])
         self.assertTrue(detector.process(frame=None, ts=2.0)["seated"])
 
+    def test_force_seated_ignores_a_steep_thigh(self):
+        standing = dict(upright(), knee=(110.0, 420.0, 1.0))  # thigh near vertical
+        self.assertFalse(self.make(standing).process(frame=None, ts=5.0)["seated"])
+        detector = PostureDetector(StubLandmarker(standing), tolerance=20.0, force_seated=True)
+        self.assertFalse(detector.process(frame=None, ts=0.0)["seated"])
+        self.assertTrue(detector.process(frame=None, ts=2.0)["seated"])
+        # Nobody in frame is still away, forced or not.
+        detector.landmarker.landmarks = None
+        self.assertFalse(detector.process(frame=None, ts=3.0)["seated"])
+
     def test_slouch_lowers_score(self):
         detector = self.make(slouching())
         detector.set_baseline(12.0, 4.0)
