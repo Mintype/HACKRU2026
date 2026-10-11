@@ -324,19 +324,6 @@ class PostureDetector:
         for pt in (ear, shoulder, hip, knee):
             cv2.circle(frame, pt, 5, color, -1, cv2.LINE_AA)
 
-        neck = reading.get("neck_angle")
-        torso = reading.get("torso_angle")
-        label = []
-        if neck is not None:
-            label.append(f"neck {neck:.0f}deg")
-        if torso is not None:
-            label.append(f"torso {torso:.0f}deg")
-        if score is not None:
-            label.append(f"score {score:.2f}")
-        if label:
-            mid = ((ear[0] + shoulder[0]) // 2, (ear[1] + shoulder[1]) // 2 - 12)
-            cv2.putText(frame, "  ".join(label), mid, cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
-
         state = reading.get("state")
         if state:
             cv2.rectangle(frame, (0, 0), (frame.shape[1], 34), (25, 25, 30), -1)
