@@ -622,6 +622,12 @@ bluetoothctl
 [bluetooth]# connect AA:BB:CC:DD:EE:FF
 ```
 
+Or run `voice/test_nest_bluetooth.sh` as your normal user (not sudo), with the Nest
+in pairing mode: it pairs, trusts, connects, makes the Nest the default output and
+plays a test chime. Run it again with the MAC
+(`voice/test_nest_bluetooth.sh AA:BB:CC:DD:EE:FF`) any time to check the link;
+add `--idle 10` to confirm it still plays after 10 minutes of silence.
+
 Put that MAC in `NEST_BLUETOOTH_MAC`, set the hostname to `posture`, then run on
 boot with `deploy/posture-coach.service` (`systemctl enable --now posture-coach`).
 Rebooting should bring the website back by itself within a minute.
